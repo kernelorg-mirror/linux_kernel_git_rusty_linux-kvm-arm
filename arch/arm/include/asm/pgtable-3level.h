@@ -156,4 +156,13 @@ static inline pmd_t *pmd_offset(pud_t *pud, unsigned long addr)
 
 #endif /* __ASSEMBLY__ */
 
+/*
+ * 2-nd stage PTE definitions for LPAE.
+ */
+#define L_PTE2_READ		(_AT(pteval_t, 1) << 6)	/* HAP[0] */
+#define L_PTE2_WRITE		(_AT(pteval_t, 1) << 7)	/* HAP[1] */
+#define L_PTE2_NORM_WB		(_AT(pteval_t, 3) << 4)	/* MemAttr[3:2] */
+#define L_PTE2_INNER_WB		(_AT(pteval_t, 3) << 2)	/* MemAttr[1:0] */
+
+
 #endif /* _ASM_PGTABLE_3LEVEL_H */
