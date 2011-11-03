@@ -295,7 +295,6 @@ config ARCH_VERSATILE
 	select PLAT_VERSATILE_CLCD
 	select PLAT_VERSATILE_FPGA_IRQ
 	select ARM_TIMER_SP804
-	select MULTI_IRQ_HANDLER
 	help
 	  This enables support for ARM Ltd Versatile board.
 
@@ -411,7 +410,6 @@ config ARCH_EP93XX
 	select ARCH_HAS_HOLES_MEMORYMODEL
 	select ARCH_USES_GETTIMEOFFSET
 	select NEED_MACH_MEMORY_H
-	select MULTI_IRQ_HANDLER
 	help
 	  This enables support for the Cirrus EP93xx series of CPUs.
 
@@ -453,7 +451,6 @@ config ARCH_NETX
 	select CPU_ARM926T
 	select ARM_VIC
 	select GENERIC_CLOCKEVENTS
-	select MULTI_IRQ_HANDLER
 	help
 	  This enables support for systems based on the Hilscher NetX Soc
 
@@ -653,7 +650,6 @@ config ARCH_PICOXCELL
 	select GENERIC_GPIO
 	select HAVE_SCHED_CLOCK
 	select HAVE_TCM
-	select MULTI_IRQ_HANDLER
 	select NO_IOPORT
 	select USE_OF
 	help
@@ -789,7 +785,6 @@ config ARCH_S3C64XX
 	select SAMSUNG_GPIOLIB_4BIT
 	select HAVE_S3C2410_I2C if I2C
 	select HAVE_S3C2410_WATCHDOG if WATCHDOG
-	select MULTI_IRQ_HANDLER
 	help
 	  Samsung S3C64XX series based systems
 
@@ -805,7 +800,6 @@ config ARCH_S5P64X0
 	select HAVE_SCHED_CLOCK
 	select HAVE_S3C2410_I2C if I2C
 	select HAVE_S3C_RTC if RTC_CLASS
-	select MULTI_IRQ_HANDLER
 	help
 	  Samsung S5P64X0 CPU based systems, such as the Samsung SMDK6440,
 	  SMDK6450.
@@ -821,7 +815,6 @@ config ARCH_S5PC100
 	select HAVE_S3C2410_I2C if I2C
 	select HAVE_S3C_RTC if RTC_CLASS
 	select HAVE_S3C2410_WATCHDOG if WATCHDOG
-	select MULTI_IRQ_HANDLER
 	help
 	  Samsung S5PC100 series based systems
 
@@ -842,7 +835,6 @@ config ARCH_S5PV210
 	select HAVE_S3C_RTC if RTC_CLASS
 	select HAVE_S3C2410_WATCHDOG if WATCHDOG
 	select NEED_MACH_MEMORY_H
-	select MULTI_IRQ_HANDLER
 	help
 	  Samsung S5PV210/S5PC110 series based systems
 
@@ -902,7 +894,6 @@ config ARCH_U300
 	select GENERIC_GPIO
 	select ARCH_REQUIRE_GPIOLIB
 	select NEED_MACH_MEMORY_H
-	select MULTI_IRQ_HANDLER
 	help
 	  Support for ST-Ericsson U300 series mobile platforms.
 
@@ -925,7 +916,6 @@ config ARCH_NOMADIK
 	select CLKDEV_LOOKUP
 	select GENERIC_CLOCKEVENTS
 	select ARCH_REQUIRE_GPIOLIB
-	select MULTI_IRQ_HANDLER
 	help
 	  Support for the Nomadik platform by ST-Ericsson
 
@@ -962,7 +952,6 @@ config PLAT_SPEAR
 	select CLKSRC_MMIO
 	select GENERIC_CLOCKEVENTS
 	select HAVE_CLK
-	select MULTI_IRQ_HANDLER
 	help
 	  Support for ST's SPEAr platform (SPEAr3xx, SPEAr6xx and SPEAr13xx).
 
