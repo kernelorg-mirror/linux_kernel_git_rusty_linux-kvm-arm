@@ -407,13 +407,16 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu, struct kvm_run *run)
 
 		trace_kvm_entry(vcpu->arch.regs.pc);
 		debug_ws_enter(vcpu->arch.regs.pc);
+
+		
+		local_irq_save(flags);
 		kvm_guest_enter();
 
-		local_irq_save(flags);
 		ret = __kvm_vcpu_run(vcpu);
-		local_irq_restore(flags);
 
 		kvm_guest_exit();
+		local_irq_restore(flags);
+
 		debug_ws_exit(vcpu->arch.regs.pc);
 		trace_kvm_exit(vcpu->arch.regs.pc);
 
