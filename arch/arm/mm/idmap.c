@@ -66,8 +66,10 @@ static void __identity_mapping_add(pgd_t *pgd, unsigned long addr,
 
 	prot = PMD_TYPE_SECT | PMD_SECT_AP_WRITE | PMD_SECT_AF;
 
+#ifdef CONFIG_ARM_LPAE
 	if (hyp_mapping)
 		prot |= PMD_SECT_AP1;
+#endif
 
 	if (cpu_architecture() <= CPU_ARCH_ARMv5TEJ && !cpu_is_xscale())
 		prot |= PMD_BIT4;
