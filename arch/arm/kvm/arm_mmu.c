@@ -106,14 +106,15 @@ static void remove_hyp_pmd_mappings(pgd_t *pgd, unsigned long addr,
 /**
  * remove_hyp_mappings - clear hypervisor mappings from specified range
  * @hyp_pgd:	The Hyp-mode page table pointer
- * @start:	The start virtual address of the area to clear
- * @end:	The end virtual address of the area to clear
+ * @from:	The start virtual address of the area to clear
+ * @to:		The end virtual address of the area to clear (exclusive)
  *
  * The page tables aren't actually freed - call free_hyp_pmds to do this.
  */
-void remove_hyp_mappings(pgd_t *hyp_pgd, unsigned long start,
-					 unsigned long end)
+void remove_hyp_mappings(pgd_t *hyp_pgd, void *from, void *to)
 {
+	unsigned long start = (unsigned long)from;
+	unsigned long end = (unsigned long)to;
 	pgd_t *pgd;
 	pud_t *pud;
 	unsigned long addr, next;
@@ -183,14 +184,16 @@ static int create_hyp_pmd_mappings(pud_t *pud, unsigned long addr,
 /**
  * create_hyp_mappings - map a kernel virtual address range in Hyp mode
  * @hyp_pgd:	The allocated hypervisor level-1 table
- * @start:	The virtual kernel start address of the range
- * @end:	The virtual kernel end address of the range
+ * @from:	The virtual kernel start address of the range
+ * @to:		The virtual kernel end address of the range (exclusive)
  *
  * The same virtual address as the kernel virtual address is also used in
  * Hyp-mode mapping to the same underlying physical pages.
  */
-int create_hyp_mappings(pgd_t *hyp_pgd, unsigned long start, unsigned long end)
+int create_hyp_mappings(pgd_t *hyp_pgd, void *from, void *to)
 {
+	unsigned long start = (unsigned long)from;
+	unsigned long end = (unsigned long)to;
 	pgd_t *pgd;
 	pud_t *pud;
 	pmd_t *pmd;

@@ -29,12 +29,8 @@
 
 extern pgd_t *kvm_hyp_pgd;
 
-int create_hyp_mappings(pgd_t *hyp_pgd,
-			unsigned long start,
-			unsigned long end);
-void remove_hyp_mappings(pgd_t *hyp_pgd,
-			 unsigned long start,
-			 unsigned long end);
+int create_hyp_mappings(pgd_t *hyp_pgd, void *from, void *to);
+void remove_hyp_mappings(pgd_t *hyp_pgd, void *from, void *to);
 void free_hyp_pmds(pgd_t *hyp_pgd);
 
 int kvm_alloc_stage2_pgd(struct kvm *kvm);

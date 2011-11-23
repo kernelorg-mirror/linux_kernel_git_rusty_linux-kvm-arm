@@ -38,14 +38,14 @@ asm(".equ SMCHYP_HVBAR_W, 0xfffffff0");
 #ifndef __ASSEMBLY__
 struct kvm_vcpu;
 
-extern unsigned long __kvm_hyp_init;
-extern unsigned long __kvm_hyp_init_end;
+extern char __kvm_hyp_init[];
+extern char __kvm_hyp_init_end[];
 
-extern unsigned long __kvm_hyp_vector;
-extern unsigned long __kvm_hyp_vector_end;
+extern char __kvm_hyp_vector[];
+extern char __kvm_hyp_vector_end[];
 
 extern int __kvm_vcpu_run(struct kvm_vcpu *vcpu);
-extern unsigned long __kvm_vcpu_run_end;
+extern char __kvm_vcpu_run_end[];
 #endif
 
 #endif /* __ARM_KVM_ASM_H__ */
