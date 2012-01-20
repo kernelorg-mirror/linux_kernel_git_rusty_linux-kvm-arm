@@ -229,6 +229,7 @@ static struct clocksource clocksource_counter = {
 	.flags	= CLOCK_SOURCE_IS_CONTINUOUS,
 };
 
+#ifdef CONFIG_LOCAL_TIMERS
 static void __cpuinit arch_timer_stop(struct clock_event_device *clk)
 {
 	pr_debug("arch_timer_teardown disable IRQ%d cpu #%d\n",
@@ -243,6 +244,9 @@ static struct local_timer_ops arch_timer_ops __cpuinitdata = {
 	.setup	= arch_timer_setup,
 	.stop	= arch_timer_stop,
 };
+#endif
+
+static struct clock_event_device arch_timer_global_evt;
 
 static int __init arch_timer_common_register(void)
 {
@@ -277,7 +281,16 @@ static int __init arch_timer_common_register(void)
 		}
 	}
 
-	err = local_timer_register(&arch_timer_ops);
+#ifdef CONFIG_LOCAL_TIMERS
+	if (is_smp())
+		err = local_timer_register(&arch_timer_ops);
+	else
+#endif
+	{
+		arch_timer_global_evt.cpumask = cpumask_of(0);
+		err = arch_timer_setup(&arch_timer_global_evt);
+	}
+
 	if (err)
 		goto out_free_irq;
 
