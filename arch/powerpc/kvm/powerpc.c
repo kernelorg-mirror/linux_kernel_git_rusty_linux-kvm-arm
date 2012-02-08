@@ -43,6 +43,11 @@ int kvm_arch_vcpu_runnable(struct kvm_vcpu *v)
 	       v->requests;
 }
 
+int kvm_arch_vcpu_in_guest_mode(struct kvm_vcpu *vcpu)
+{
+	return kvm_vcpu_exiting_guest_mode(vcpu) == IN_GUEST_MODE;
+}
+
 int kvmppc_kvm_pv(struct kvm_vcpu *vcpu)
 {
 	int nr = kvmppc_get_gpr(vcpu, 11);
@@ -342,6 +347,15 @@ void kvm_arch_vcpu_destroy(struct kvm_vcpu *vcpu)
 int kvm_cpu_has_pending_timer(struct kvm_vcpu *vcpu)
 {
 	return kvmppc_core_pending_dec(vcpu);
+}
+
+static void kvmppc_decrementer_func(unsigned long data)
+{
+	struct kvm_vcpu *vcpu = (struct kvm_vcpu *)data;
+
+	kvmppc_core_queue_dec(vcpu);
+
+	kvm_vcpu_kick(vcpu);
 }
 
 /*

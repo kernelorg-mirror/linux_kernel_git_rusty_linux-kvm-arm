@@ -344,6 +344,7 @@ int kvmppc_vcpu_run(struct kvm_run *kvm_run, struct kvm_vcpu *vcpu)
 		return -EINVAL;
 	}
 
+	vcpu->mode = IN_GUEST_MODE;
 	local_irq_disable();
 
 	kvmppc_core_prepare_to_enter(vcpu);
@@ -360,6 +361,7 @@ int kvmppc_vcpu_run(struct kvm_run *kvm_run, struct kvm_vcpu *vcpu)
 
 out:
 	local_irq_enable();
+	vcpu->mode = OUTSIDE_GUEST_MODE;
 	return ret;
 }
 
