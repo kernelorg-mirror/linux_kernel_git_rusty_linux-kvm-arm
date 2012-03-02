@@ -17,6 +17,8 @@
 #ifndef __ARM_KVM_HOST_H__
 #define __ARM_KVM_HOST_H__
 
+#include <asm/kvm_vgic.h>
+
 #define KVM_MAX_VCPUS 1
 #define KVM_MEMORY_SLOTS 32
 #define KVM_PRIVATE_MEM_SLOTS 4
@@ -40,6 +42,9 @@ struct kvm_arch {
 
 	/* VTTBR value associated with above pgd and vmid */
 	u64    vttbr;
+
+	/* Interrupt controller */
+	struct vgic_dist	vgic;
 };
 
 #define EXCEPTION_NONE      0
@@ -105,6 +110,7 @@ struct kvm_vcpu_arch {
 	/* Interrupt related fields */
 	u32 irq_lines;		/* IRQ and FIQ levels */
 	u32 wait_for_interrupts;
+	struct vgic_cpu vgic_cpu;
 };
 
 struct kvm_vm_stat {

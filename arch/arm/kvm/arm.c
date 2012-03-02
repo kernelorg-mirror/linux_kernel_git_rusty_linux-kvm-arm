@@ -106,6 +106,10 @@ int kvm_arch_init_vm(struct kvm *kvm, unsigned long type)
 		goto out_fail_alloc;
 	mutex_init(&kvm->arch.pgd_mutex);
 
+	ret = kvm_vgic_init(kvm);
+	if (ret)
+		goto out_free_stage2_pgd;
+		
 	ret = create_hyp_mappings(kvm_hyp_pgd, kvm, kvm + 1);
 	if (ret)
 		goto out_free_stage2_pgd;
@@ -251,6 +255,10 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 	/* Compute guest MPIDR */
 	vcpu->arch.cp15[c0_MPIDR] = (read_cpuid_mpidr() & ~0xff)
 				    | vcpu->vcpu_id;
+
+	/* Set up VGIC */
+	kvm_vgic_vcpu_init(vcpu);
+
 	return 0;
 }
 
@@ -487,9 +495,11 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu, struct kvm_run *run)
 		local_irq_disable();
 		kvm_guest_enter();
 		vcpu->mode = IN_GUEST_MODE;
+		kvm_vgic_sync_to_cpu(vcpu);
 
 		ret = __kvm_vcpu_run(vcpu);
 
+		kvm_vgic_sync_from_cpu(vcpu);
 		vcpu->mode = OUTSIDE_GUEST_MODE;
 		kvm_guest_exit();
 		local_irq_enable();
@@ -714,6 +724,12 @@ static int init_hyp_mode(void)
 			goto out_free_mappings;
 		}
 	}
+
+	/*
+	 * Init HYP view of VGIC
+	 */
+	if (kvm_vgic_hyp_init())
+		goto out_free_mappings;
 
 	/*
 	 * Set the HVBAR to the virtual kernel address
