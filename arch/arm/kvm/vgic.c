@@ -321,8 +321,8 @@ int vgic_handle_mmio(struct kvm_vcpu *vcpu, struct kvm_run *run)
 		return KVM_EXIT_MMIO;
 
 	spin_lock(&vcpu->kvm->arch.vgic.lock);
-	pr_err("emulating %d %08llx %d\n", run->mmio.is_write,
-	       run->mmio.phys_addr, run->mmio.len);
+	pr_debug("emulating %d %08llx %d\n", run->mmio.is_write,
+		 run->mmio.phys_addr, run->mmio.len);
 	range->handle_mmio(vcpu, run, run->mmio.phys_addr - range->base);
 	kvm_handle_mmio_return(vcpu, run);
 	spin_unlock(&vcpu->kvm->arch.vgic.lock);
@@ -338,6 +338,7 @@ static void kvm_vgic_cpu_inject_irq(struct kvm_vcpu *vcpu, u8 cpuid,
 {
 	struct vgic_cpu *vgic_cpu = &vcpu->arch.vgic_cpu;
 
+	pr_debug("Inject IRQ%d to CPU%d\n", irq, cpuid);
 	BUG_ON(irq >= VGIC_NR_IRQS);
 	spin_lock(&vgic_cpu->lock);
 	set_bit(irq, vgic_cpu->vgic_pending_irq);
@@ -430,6 +431,7 @@ static void vgic_update_state(struct kvm *kvm)
 		int targ;
 
 		if (test_bit(i, enabled)) {
+			int targ_idx;
 			clear_bit(i, pending);
 
 			targ = vgic_bytemap_get_irq_val(&dist->irq_target, 0, irq);
@@ -446,7 +448,9 @@ static void vgic_update_state(struct kvm *kvm)
 			 * need a maintainance interrupt when one of
 			 * the CPUs ACKs the interrupt. How?
 			 */
-			kvm_vgic_cpu_inject_irq(kvm_get_vcpu(kvm, ffs(targ) - 1), 0, irq);
+			targ_idx = ffs(targ) - 1;
+			if (targ_idx < nrcpus)
+				kvm_vgic_cpu_inject_irq(kvm_get_vcpu(kvm, targ_idx), 0, irq);
 		}
 
 		i = find_next_bit((unsigned long *)pending, VGIC_NR_IRQS - 32, i + 1);
@@ -470,36 +474,39 @@ static void __kvm_vgic_sync_to_cpu(struct vgic_cpu *vgic_cpu)
 		int cpuid = (irq < 16) ? vgic_cpu->vgic_pending_cpuid[irq]
 				       : 0;
 
-		pr_err("irq = %d\n", irq);
+		pr_debug("irq = %d\n", irq);
 		pending = find_next_bit(vgic_cpu->vgic_pending_irq,
 					VGIC_NR_IRQS, pending + 1);
 
 		/* Do we have an active interrupt for the same CPUID? */
 		if (lr != 0xff &&
 		    (vgic_cpu->vgic_lr[lr] & VGIC_LR_PHYSID_CPUID) == (cpuid << 10)) {
-			BUG_ON(!(vgic_cpu->vgic_lr[lr] & VGIC_LR_ACTIVE_BIT));
+			pr_debug("LR%d piggyback for IRQ%d %x\n", lr, irq, cpuid); 
 			vgic_cpu->vgic_lr[lr] |= VGIC_LR_PENDING_BIT;
 			clear_bit(irq, vgic_cpu->vgic_pending_irq);
 			continue;
 		}
 
 		/* Try to use another LR for this interrupt */
-		if (empty > vgic_cpu->nr_lr) {
+		if (empty >= vgic_cpu->nr_lr) {
 			/*
 			 * No empty LR. Enable the underflow bit so we
 			 * get a maintainance interrupt when there
 			 * will be no pending interrupts at the VM
 			 * level.
 			 */
+			pr_debug("Setting underflow\n");
 			vgic_cpu->vgic_hcr |= VGIC_HCR_UIE;
 			return;
 		}
 
 		lr = empty;
+		pr_debug("LR%d allocated for IRQ%d %x\n", lr, irq, cpuid);
 		vgic_cpu->vgic_lr[lr] = (VGIC_LR_PENDING_BIT |
 					 (cpuid << 10) | irq);
 		vgic_cpu->vgic_irq_lr_map[irq] = lr;
 		vgic_cpu->vgic_lr_irq_map[lr] = irq;
+		clear_bit(irq, vgic_cpu->vgic_pending_irq);
 
 		empty = find_next_bit((unsigned long *)vgic_cpu->vgic_elsr,
 				      vgic_cpu->nr_lr, empty + 1);
@@ -574,7 +581,7 @@ void kvm_vgic_inject_irq(struct kvm *kvm, u8 cpuid, unsigned int irq)
 	if (WARN_ON(irq >= VGIC_NR_IRQS))
 		return;
 
-	pr_err("Inject IRQ%d to CPU%d\n", irq, cpuid);
+	pr_debug("Inject IRQ%d to CPU%d\n", irq, cpuid);
 	spin_lock(&kvm->arch.vgic.lock);
 	vgic_bitmap_set_irq_val(&kvm->arch.vgic.irq_pending, cpuid, irq, 1);
 	vgic_update_state(kvm);

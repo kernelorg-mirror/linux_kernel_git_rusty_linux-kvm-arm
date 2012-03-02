@@ -26,13 +26,13 @@ static inline u32 *typename##_get_reg(struct typename *x,		  \
 				      int cpuid, u32 offset)		  \
 {									  \
 	static const int irq_per_u32 = sizeof(u32) * 8 / size;		  \
-	static const int priv_offset = 32 / irq_per_u32;		  \
+	static const int glob_offset = 32 / irq_per_u32;		  \
 	offset >>= 2;							  \
 	BUG_ON(offset > (VGIC_NR_IRQS  / irq_per_u32));			  \
-	if (offset < priv_offset)					  \
-		return x->private + offset + (cpuid * priv_offset);	  \
+	if (offset < glob_offset)					  \
+		return x->private + offset + (cpuid * glob_offset);	  \
 	else								  \
-		return x->global + offset - priv_offset;		  \
+		return x->global + offset - glob_offset;		  \
 }									  \
 static inline int typename##_get_irq_val(struct typename *x,		  \
 					 int cpuid, int irq)		  \
@@ -40,7 +40,7 @@ static inline int typename##_get_irq_val(struct typename *x,		  \
 	static const int irq_per_u32 = sizeof(u32) * 8 / size;		  \
 	static const u32 mask = (1 << size) - 1;			  \
 	u32 *reg, offset, shift;					  \
-	offset = irq / irq_per_u32;					  \
+	offset = (irq / irq_per_u32) << 2;				\
 	shift = (irq % irq_per_u32) * size;				  \
 	reg = typename##_get_reg(x, cpuid, offset);			  \
 	return (*reg >> shift) & mask;					  \
@@ -51,7 +51,7 @@ static inline void typename##_set_irq_val(struct typename *x,		  \
 	static const int irq_per_u32 = sizeof(u32) * 8 / size;		  \
 	static const u32 mask = (1 << size) - 1;			  \
 	u32 *reg, offset, shift;					  \
-	offset = irq / irq_per_u32;					  \
+	offset = (irq / irq_per_u32) << 2;				\
 	shift = (irq % irq_per_u32) * size;				  \
 	reg = typename##_get_reg(x, cpuid, offset);			  \
 	*reg &= ~(mask << shift);					  \
@@ -61,10 +61,10 @@ static inline u32 *typename##_get_private_map(struct typename *x,	  \
 					      int cpu_id)		  \
 {									  \
 	static const int irq_per_u32 = sizeof(u32) * 8 / size;		  \
-	static const int priv_offset = 32 / irq_per_u32;		  \
+	static const int glob_offset = 32 / irq_per_u32;		  \
 	if (unlikely(cpu_id >= VGIC_MAX_CPUS))				  \
 		return NULL;						  \
-	return x->private + (cpu_id * priv_offset);			  \
+	return x->private + (cpu_id * glob_offset);			  \
 }
 
 
