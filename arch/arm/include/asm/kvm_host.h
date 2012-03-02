@@ -17,12 +17,12 @@
 #ifndef __ARM_KVM_HOST_H__
 #define __ARM_KVM_HOST_H__
 
-#include <asm/kvm_vgic.h>
-
-#define KVM_MAX_VCPUS 1
+#define KVM_MAX_VCPUS 2
 #define KVM_MEMORY_SLOTS 32
 #define KVM_PRIVATE_MEM_SLOTS 4
 #define KVM_COALESCED_MMIO_PAGE_OFFSET 1
+
+#include <asm/kvm_vgic.h>
 
 /* We don't currently support large pages. */
 #define KVM_HPAGE_GFN_SHIFT(x)	0

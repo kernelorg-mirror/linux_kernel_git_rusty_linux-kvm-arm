@@ -25,6 +25,7 @@
 #include <asm/kvm_emulate.h>
 
 struct kvm_stats_debugfs_item debugfs_entries[] = {
+	{ "vcpu", offsetof(struct kvm, vcpus), KVM_STAT_VM },
 	{ NULL }
 };
 

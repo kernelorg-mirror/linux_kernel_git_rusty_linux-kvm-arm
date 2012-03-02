@@ -302,12 +302,9 @@ int kvm_arch_vcpu_ioctl_set_mpstate(struct kvm_vcpu *vcpu,
  */
 int kvm_arch_vcpu_runnable(struct kvm_vcpu *v)
 {
-#if 0
 	return !!v->arch.irq_lines ||
+		kvm_vgic_vcpu_pending_irq(v) ||
 		!v->arch.wait_for_interrupts;
-#else
-	return 1;
-#endif
 }
 
 int kvm_arch_vcpu_in_guest_mode(struct kvm_vcpu *v)
