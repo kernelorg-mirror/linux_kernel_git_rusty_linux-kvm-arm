@@ -55,7 +55,17 @@ static inline void typename##_set_irq_val(struct typename *x,		  \
 	reg = typename##_get_reg(x, cpuid, offset);			  \
 	*reg &= ~(mask << shift);					  \
 	*reg |= (val & mask) << shift;					  \
+}									  \
+static inline u32 *typename##_get_private_map(struct typename *x,	  \
+					      int cpu_id)		  \
+{									  \
+	static const int irq_per_u32 = sizeof(u32) * 8 / size;		  \
+	static const int priv_offset = 32 / irq_per_u32;		  \
+	if (unlikely(cpu_id >= VGIC_MAX_CPUS))				  \
+		return NULL;						  \
+	return x->private + (cpu_id * priv_offset);			  \
 }
+
 
 DEFINE_VGIC_MAP_STRUCT(vgic_bitmap, 1);
 DEFINE_VGIC_MAP_STRUCT(vgic_2bitmap, 2);

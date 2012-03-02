@@ -390,12 +390,11 @@ static void vgic_send_sgi(struct kvm_vcpu *vcpu)
 	}
 }
 
-/* FIXME: using vgic_bitmap_{g,s}et_irq_val in a loop is grossly
- * inefficient. need to treat it as a *real* bitmap */
 static void vgic_update_state(struct kvm *kvm)
 {
 	struct vgic_dist *dist = &kvm->arch.vgic;
 	int nrcpus = atomic_read(&kvm->online_vcpus);
+	void *enabled, *pending;
 	int c, i;
 
 	if (!dist->enabled)
@@ -406,42 +405,48 @@ static void vgic_update_state(struct kvm *kvm)
 		vgic_send_sgi(kvm_get_vcpu(kvm, c));
 
 		/* PPIs */
-		for (i = 16; i < 32; i++) {
-			if (!vgic_bitmap_get_irq_val(&dist->irq_enabled, c, i))
-				continue;
-			if (!vgic_bitmap_get_irq_val(&dist->irq_pending, c, i))
-				continue;
+		enabled = vgic_bitmap_get_private_map(&dist->irq_enabled, c);
+		pending = vgic_bitmap_get_private_map(&dist->irq_pending, c);
+		i = find_next_bit((unsigned long *)pending, 32, 16);
+		while (i < 32) {
+			if (test_bit(i, enabled)) {
+				clear_bit(i, pending);
+				kvm_vgic_cpu_inject_irq(kvm_get_vcpu(kvm, c), c, i);
+			}
 
-			/* clear pending */
-			vgic_bitmap_set_irq_val(&dist->irq_pending, c, i, 0);
-			kvm_vgic_cpu_inject_irq(kvm_get_vcpu(kvm, c), c, i);
+			i = find_next_bit((unsigned long *)pending, 32, i + 1);
 		}
 	}
 
 	/* SPIs */
-	for (i = 32; i < VGIC_NR_IRQS; i++) {
+	enabled = dist->irq_enabled.global;
+	pending = dist->irq_pending.global;
+	i = find_first_bit((unsigned long *)pending, VGIC_NR_IRQS - 32);
+	while (i < (VGIC_NR_IRQS - 32)) {
+		int irq = i + 32;
 		int targ;
-		if (!vgic_bitmap_get_irq_val(&dist->irq_enabled, 0, i))
-			continue;
-		if (!vgic_bitmap_get_irq_val(&dist->irq_pending, 0, i))
-			continue;
 
-		targ = vgic_bytemap_get_irq_val(&dist->irq_target, 0, i);
+		if (test_bit(i, enabled)) {
+			clear_bit(i, pending);
 
-		/* clear pending */
-		vgic_bitmap_set_irq_val(&dist->irq_pending, 0, i, 0);
-		/*
-		 * FIXME: We mark the interrupt pending on the first
-		 * target CPU only.  This is utterly wrong, as this
-		 * CPU may be offline!
-		 *
-		 * A solution would be to mark the interrupt pending
-		 * on ALL target vcpus, and clear the pending state at
-		 * the distributor level. It then becomes horribly
-		 * racy... Idealy, we'd need a maintainance interrupt
-		 * when one of the CPUs ACKs the interrupt. How?
-		 */
-		kvm_vgic_cpu_inject_irq(kvm_get_vcpu(kvm, ffs(targ) - 1), 0, i);
+			targ = vgic_bytemap_get_irq_val(&dist->irq_target, 0, irq);
+
+			/*
+			 * FIXME: We mark the interrupt pending on the
+			 * first target CPU only.  This is utterly
+			 * wrong, as this CPU may be offline!
+			 *
+			 * A solution would be to mark the interrupt
+			 * pending on ALL target vcpus, and clear the
+			 * pending state at the distributor level. It
+			 * then becomes horribly racy... Idealy, we'd
+			 * need a maintainance interrupt when one of
+			 * the CPUs ACKs the interrupt. How?
+			 */
+			kvm_vgic_cpu_inject_irq(kvm_get_vcpu(kvm, ffs(targ) - 1), 0, irq);
+		}
+
+		i = find_next_bit((unsigned long *)pending, VGIC_NR_IRQS - 32, i + 1);
 	}
 }
 
