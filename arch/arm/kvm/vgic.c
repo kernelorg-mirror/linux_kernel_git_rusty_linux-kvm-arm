@@ -283,7 +283,7 @@ static const struct mmio_range vgic_ranges[] = {
 	},
 	{			/* ICFGRn */
 		.base		= VGIC_DIST_BASE + 0xC00,
-		.len		= VGIC_NR_IRQS / 2,
+		.len		= VGIC_NR_IRQS / 4,
 		.handle_mmio	= handle_mmio_cfg_reg,
 	},
 	{			/* SGIRn */
