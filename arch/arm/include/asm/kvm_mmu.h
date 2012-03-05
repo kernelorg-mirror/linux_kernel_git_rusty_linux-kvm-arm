@@ -28,6 +28,7 @@
 #define PGD2_ORDER	get_order(PTRS_PER_PGD2 * sizeof(pgd_t))
 
 int create_hyp_mappings(void *from, void *to);
+int create_hyp_io_mappings(void *from, void *to, phys_addr_t);
 void free_hyp_pmds(void);
 
 int kvm_hyp_pgd_alloc(void);
