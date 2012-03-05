@@ -16,11 +16,13 @@
 
 #include <linux/mman.h>
 #include <linux/kvm_host.h>
+#include <linux/io.h>
 #include <trace/events/kvm.h>
 #include <asm/pgalloc.h>
 #include <asm/kvm_arm.h>
 #include <asm/kvm_mmu.h>
 #include <asm/kvm_emulate.h>
+#include <asm/mach/map.h>
 
 #include "trace.h"
 
@@ -72,8 +74,10 @@ void free_hyp_pmds(pgd_t *hyp_pgd)
 	mutex_unlock(&kvm_hyp_pgd_mutex);
 }
 
+typedef void (*hyp_pte_map_fn_t)(pmd_t *, unsigned long, unsigned long, unsigned long *);
+
 static void create_hyp_pte_mappings(pmd_t *pmd, unsigned long start,
-						unsigned long end)
+				    unsigned long end, unsigned long *pfn_base)
 {
 	pte_t *pte;
 	struct page *page;
@@ -88,8 +92,27 @@ static void create_hyp_pte_mappings(pmd_t *pmd, unsigned long start,
 	}
 }
 
+static void create_hyp_pte_io_mappings(pmd_t *pmd, unsigned long start,
+				       unsigned long end, unsigned long *pfn_base)
+{
+	pte_t *pte;
+	unsigned long addr;
+	pgprot_t prot;
+
+	prot = __pgprot(get_mem_type_prot_pte(MT_DEVICE) | L_PTE_USER);
+
+	for (addr = start & PAGE_MASK; addr < end; addr += PAGE_SIZE) {
+		BUG_ON(pfn_valid(*pfn_base));
+		pte = pte_offset_kernel(pmd, addr);
+
+		set_pte_ext(pte, pfn_pte(*pfn_base, prot), 0);
+		(*pfn_base)++;
+	}
+}
+
 static int create_hyp_pmd_mappings(pud_t *pud, unsigned long start,
-					       unsigned long end)
+				   unsigned long end, hyp_pte_map_fn_t map_fn,
+				   unsigned long *pfn_base)
 {
 	pmd_t *pmd;
 	pte_t *pte;
@@ -110,7 +133,7 @@ static int create_hyp_pmd_mappings(pud_t *pud, unsigned long start,
 		}
 
 		next = pmd_addr_end(addr, end);
-		create_hyp_pte_mappings(pmd, addr, next);
+		map_fn(pmd, addr, next, pfn_base);
 	}
 
 	return 0;
@@ -127,7 +150,9 @@ static int create_hyp_pmd_mappings(pud_t *pud, unsigned long start,
  *
  * Note: Wrapping around zero in the "to" address is not supported.
  */
-int create_hyp_mappings(pgd_t *hyp_pgd, void *from, void *to)
+static int __create_hyp_mappings(pgd_t *hyp_pgd, void *from, void *to,
+				 hyp_pte_map_fn_t map_fn,
+				 unsigned long *pfn_base)
 {
 	unsigned long start = (unsigned long)from;
 	unsigned long end = (unsigned long)to;
@@ -157,13 +182,24 @@ int create_hyp_mappings(pgd_t *hyp_pgd, void *from, void *to)
 		}
 
 		next = pgd_addr_end(addr, end);
-		err = create_hyp_pmd_mappings(pud, addr, next);
+		err = create_hyp_pmd_mappings(pud, addr, next, map_fn, pfn_base);
 		if (err)
 			goto out;
 	}
 out:
 	mutex_unlock(&kvm_hyp_pgd_mutex);
 	return err;
+}
+
+int create_hyp_mappings(pgd_t *hyp_pgd, void *from, void *to)
+{
+	return __create_hyp_mappings(hyp_pgd, from, to, create_hyp_pte_mappings, NULL);
+}
+
+int create_hyp_io_mappings(pgd_t *hyp_pgd, void *from, void *to, phys_addr_t addr)
+{
+	unsigned long pfn = __phys_to_pfn(addr);
+	return __create_hyp_mappings(hyp_pgd, from, to, create_hyp_pte_io_mappings, &pfn);
 }
 
 /**
