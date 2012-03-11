@@ -36,7 +36,7 @@
 #include <asm/kvm_asm.h>
 #include <asm/kvm_mmu.h>
 
-static DEFINE_PER_CPU(void *, kvm_arm_hyp_stack_page);
+static DEFINE_PER_CPU(unsigned long, kvm_arm_hyp_stack_page);
 
 int kvm_arch_hardware_enable(void *garbage)
 {
@@ -262,13 +262,13 @@ static void cpu_init_hyp_mode(void *vector)
 {
 	unsigned long pgd_ptr;
 	unsigned long hyp_stack_ptr;
-	void *stack_page;
+	unsigned long stack_page;
 
 	cpu_set_vector(vector);
 
 	pgd_ptr = virt_to_phys(kvm_hyp_pgd);
 	stack_page = __get_cpu_var(kvm_arm_hyp_stack_page);
-	hyp_stack_ptr = (unsigned long)stack_page + PAGE_SIZE;
+	hyp_stack_ptr = stack_page + PAGE_SIZE;
 
 	/*
 	 * Call initialization code
@@ -292,21 +292,14 @@ static int init_hyp_mode(void)
 	int err = 0;
 
 	/*
-	 * Allocate Hyp level-1 page table
-	 */
-	kvm_hyp_pgd = kzalloc(PTRS_PER_PGD * sizeof(pgd_t), GFP_KERNEL);
-	if (!kvm_hyp_pgd)
-		return -ENOMEM;
-
-	/*
 	 * Allocate stack pages for Hypervisor-mode
 	 */
 	for_each_possible_cpu(cpu)
-		per_cpu(kvm_arm_hyp_stack_page, cpu) = NULL;
+		per_cpu(kvm_arm_hyp_stack_page, cpu) = 0;
 	for_each_possible_cpu(cpu) {
-		void *stack_page;
+		unsigned long stack_page;
 
-		stack_page = (void *)__get_free_page(GFP_KERNEL);
+		stack_page = __get_free_page(GFP_KERNEL);
 		if (!stack_page) {
 			err = -ENOMEM;
 			goto out_free_stack_pages;
@@ -314,6 +307,13 @@ static int init_hyp_mode(void)
 
 		per_cpu(kvm_arm_hyp_stack_page, cpu) = stack_page;
 	}
+
+	/*
+	 * Allocate Hyp level-1 page table
+	 */
+	kvm_hyp_pgd = kzalloc(PTRS_PER_PGD * sizeof(pgd_t), GFP_KERNEL);
+	if (!kvm_hyp_pgd)
+		goto out_free_stack_pages;
 
 	init_phys_addr = virt_to_phys(__kvm_hyp_init);
 	init_end_phys_addr = virt_to_phys(__kvm_hyp_init_end);
@@ -372,7 +372,7 @@ static int init_hyp_mode(void)
 	 * Map the Hyp stack pages
 	 */
 	for_each_possible_cpu(cpu) {
-		char *stack_page = per_cpu(kvm_arm_hyp_stack_page, cpu);
+		char *stack_page = (char *)per_cpu(kvm_arm_hyp_stack_page, cpu);
 		err = create_hyp_mappings(kvm_hyp_pgd,
 					  stack_page, stack_page + PAGE_SIZE);
 
@@ -392,10 +392,10 @@ static int init_hyp_mode(void)
 	return 0;
 out_free_mappings:
 	free_hyp_pmds(kvm_hyp_pgd);
+	kfree(kvm_hyp_pgd);
 out_free_stack_pages:
 	for_each_possible_cpu(cpu)
-		free_page((unsigned long)per_cpu(kvm_arm_hyp_stack_page, cpu));
-	kfree(kvm_hyp_pgd);
+		free_page(per_cpu(kvm_arm_hyp_stack_page, cpu));
 	kvm_hyp_pgd = NULL;
 	return err;
 }
@@ -418,7 +418,11 @@ out_err:
 
 void kvm_arch_exit(void)
 {
+	int cpu;
+
 	free_hyp_pmds(kvm_hyp_pgd);
+	for_each_possible_cpu(cpu)
+		free_page(per_cpu(kvm_arm_hyp_stack_page, cpu));
 	kfree(kvm_hyp_pgd);
 	kvm_hyp_pgd = NULL;
 }
