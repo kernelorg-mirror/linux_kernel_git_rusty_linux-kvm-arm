@@ -312,8 +312,10 @@ static int init_hyp_mode(void)
 	 * Allocate Hyp level-1 page table
 	 */
 	kvm_hyp_pgd = kzalloc(PTRS_PER_PGD * sizeof(pgd_t), GFP_KERNEL);
-	if (!kvm_hyp_pgd)
+	if (!kvm_hyp_pgd) {
+		err = -ENOMEM;
 		goto out_free_stack_pages;
+	}
 
 	init_phys_addr = virt_to_phys(__kvm_hyp_init);
 	init_end_phys_addr = virt_to_phys(__kvm_hyp_init_end);
@@ -413,6 +415,7 @@ int kvm_arch_init(void *opaque)
 
 	return 0;
 out_err:
+	pr_err("kvm_arch_init failed (%d)\n", err);
 	return err;
 }
 
