@@ -2190,7 +2190,7 @@ static long kvm_dev_ioctl_check_extension_generic(long arg)
 #endif
 	case KVM_CAP_INTERNAL_ERROR_DATA:
 		return 1;
-#ifdef CONFIG_HAVE_KVM_IRQCHIP
+#ifdef KVM_CAP_IRQ_ROUTING
 	case KVM_CAP_IRQ_ROUTING:
 		return KVM_MAX_IRQ_ROUTES;
 #endif
