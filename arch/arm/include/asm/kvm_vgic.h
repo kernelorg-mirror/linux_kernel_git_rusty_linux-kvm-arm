@@ -2,6 +2,7 @@
 #define __ASM_ARM_KVM_VGIC_H
 
 #include <linux/kernel.h>
+#include <linux/kvm.h>
 #include <linux/irqreturn.h>
 #include <linux/spinlock.h>
 #include <linux/types.h>
@@ -72,6 +73,7 @@ DEFINE_VGIC_MAP_STRUCT(vgic_2bitmap, 2);
 DEFINE_VGIC_MAP_STRUCT(vgic_bytemap, 8);
 
 struct vgic_dist {
+#ifdef CONFIG_KVM_ARM_VGIC
 	spinlock_t		lock;
 
 	void __iomem		*vctrl_base;
@@ -87,9 +89,11 @@ struct vgic_dist {
 
 	u32			irq_sgi[VGIC_MAX_CPUS];
 	u32			enabled;
+#endif
 };
 
 struct vgic_cpu {
+#ifdef CONFIG_KVM_ARM_VGIC
 	spinlock_t	lock;
 
 	u8		vgic_irq_lr_map[VGIC_NR_IRQS];	/* per IRQ to LR mapping */
@@ -106,6 +110,7 @@ struct vgic_cpu {
 	u32	vgic_elsr[2];	/* Saved only */
 	u32	vgic_apr;
 	u32	vgic_lr[64];	/* A15 has only 4, need to reduce footprint */
+#endif
 };
 
 #define VGIC_HCR_EN		(1 << 0)
@@ -120,6 +125,7 @@ struct kvm;
 struct kvm_vcpu;
 struct kvm_run;
 
+#ifdef CONFIG_KVM_ARM_VGIC
 int kvm_vgic_hyp_init(void);
 int kvm_vgic_init(struct kvm *kvm);
 void kvm_vgic_vcpu_init(struct kvm_vcpu *vcpu);
@@ -127,5 +133,25 @@ void kvm_vgic_sync_to_cpu(struct kvm_vcpu *vcpu);
 void kvm_vgic_sync_from_cpu(struct kvm_vcpu *vcpu);
 void kvm_vgic_inject_irq(struct kvm *kvm, u8 cpuid, unsigned int irq);
 int vgic_handle_mmio(struct kvm_vcpu *vcpu, struct kvm_run *run);
+#else
+static inline int kvm_vgic_hyp_init(void)
+{
+	return 0;
+}
+
+static inline int kvm_vgic_init(struct kvm *kvm)
+{
+	return 0;
+}
+
+static inline void kvm_vgic_vcpu_init(struct kvm_vcpu *vcpu) {}
+static inline void kvm_vgic_sync_to_cpu(struct kvm_vcpu *vcpu) {}
+static inline void kvm_vgic_sync_from_cpu(struct kvm_vcpu *vcpu) {}
+
+static inline int vgic_handle_mmio(struct kvm_vcpu *vcpu, struct kvm_run *run)
+{
+	return KVM_EXIT_MMIO;
+}
+#endif
 
 #endif

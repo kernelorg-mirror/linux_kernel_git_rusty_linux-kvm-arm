@@ -12,6 +12,7 @@ obj-$(CONFIG_KVM_ARM_HOST) += init.o interrupts.o exports.o
 
 kvm-arm-y += $(addprefix ../../../virt/kvm/, kvm_main.o coalesced_mmio.o)
 
-kvm-arm-y += arm.o guest.o mmu.o emulate.o vgic.o
+kvm-arm-y += arm.o guest.o mmu.o emulate.o
 
 obj-$(CONFIG_KVM) += kvm-arm.o
+obj-$(CONFIG_KVM_ARM_VGIC) += vgic.o

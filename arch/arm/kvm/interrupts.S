@@ -238,6 +238,7 @@ ENTRY(__kvm_flush_vm_context)
  * @vcpup: Register pointing to VCPU struct
  */
 .macro save_vgic_state	vcpup
+#ifdef CONFIG_KVM_ARM_VGIC
 	/* Get VGIC VCTRL base into r2 */
 	ldr	r2, [\vcpup, #VCPU_KVM]
 	ldr	r2, [r2, #KVM_VGIC_VCTRL]
@@ -267,6 +268,7 @@ ENTRY(__kvm_flush_vm_context)
 	add	r5, r5, #1
 	cmp	r5, r4
 	bne	1b
+#endif
 .endm
 	
 /*
@@ -274,6 +276,7 @@ ENTRY(__kvm_flush_vm_context)
  * @vcpup: Register pointing to VCPU struct
  */
 .macro restore_vgic_state	vcpup
+#ifdef CONFIG_KVM_ARM_VGIC
 	/* Get VGIC VCTRL base into r2 */
 	ldr	r2, [\vcpup, #VCPU_KVM]
 	ldr	r2, [r2, #KVM_VGIC_VCTRL]
@@ -297,6 +300,7 @@ ENTRY(__kvm_flush_vm_context)
 	add	r5, r5, #1
 	cmp	r5, r4
 	bne	1b
+#endif
 .endm
 	
 /* Configures the HSTR (Hyp System Trap Register) on entry/return
