@@ -242,6 +242,8 @@ ENTRY(__kvm_flush_vm_context)
 	/* Get VGIC VCTRL base into r2 */
 	ldr	r2, [\vcpup, #VCPU_KVM]
 	ldr	r2, [r2, #KVM_VGIC_VCTRL]
+	cmp	r2, #0
+	beq	2f
 
 	/* Save all interesting registers */
 	ldr	r3, [r2, #GICH_HCR]
@@ -268,6 +270,7 @@ ENTRY(__kvm_flush_vm_context)
 	add	r5, r5, #1
 	cmp	r5, r4
 	bne	1b
+2:
 #endif
 .endm
 	
@@ -280,6 +283,8 @@ ENTRY(__kvm_flush_vm_context)
 	/* Get VGIC VCTRL base into r2 */
 	ldr	r2, [\vcpup, #VCPU_KVM]
 	ldr	r2, [r2, #KVM_VGIC_VCTRL]
+	cmp	r2, #0
+	beq	2f
 
 	/* We only restore a minimal set of registers */
 	ldr	r3, [\vcpup, #VCPU_VGIC_HCR]
@@ -300,6 +305,7 @@ ENTRY(__kvm_flush_vm_context)
 	add	r5, r5, #1
 	cmp	r5, r4
 	bne	1b
+2:
 #endif
 .endm
 	

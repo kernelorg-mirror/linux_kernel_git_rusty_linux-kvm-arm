@@ -313,6 +313,9 @@ int vgic_handle_mmio(struct kvm_vcpu *vcpu, struct kvm_run *run)
 {
 	const struct mmio_range *range;
 
+	if (!irqchip_in_kernel(vcpu->kvm))
+		return KVM_EXIT_MMIO;
+
 	range = find_matching_range(vgic_ranges, run);
 	if (!range || !range->handle_mmio)
 		return KVM_EXIT_MMIO;
@@ -534,6 +537,9 @@ void kvm_vgic_sync_to_cpu(struct kvm_vcpu *vcpu)
 {
 	struct vgic_cpu *vgic_cpu = &vcpu->arch.vgic_cpu;
 
+	if (!irqchip_in_kernel(vcpu->kvm))
+		return;
+
 	spin_lock(&vgic_cpu->lock);
 	__kvm_vgic_sync_to_cpu(vgic_cpu);
 	spin_unlock(&vgic_cpu->lock);
@@ -545,6 +551,9 @@ void kvm_vgic_sync_from_cpu(struct kvm_vcpu *vcpu)
 {
 	struct vgic_cpu *vgic_cpu = &vcpu->arch.vgic_cpu;
 
+	if (!irqchip_in_kernel(vcpu->kvm))
+		return;
+
 	spin_lock(&vgic_cpu->lock);
 	__kvm_vgic_sync_from_cpu(vgic_cpu);
 	spin_unlock(&vgic_cpu->lock);
@@ -555,6 +564,9 @@ void kvm_vgic_sync_from_cpu(struct kvm_vcpu *vcpu)
 void kvm_vgic_inject_irq(struct kvm *kvm, u8 cpuid, unsigned int irq)
 {
 	int nrcpus = atomic_read(&kvm->online_vcpus);
+
+	if (!irqchip_in_kernel(kvm))
+		return;
 
 	if (WARN_ON(cpuid >= nrcpus))
 		return;
@@ -588,6 +600,9 @@ void kvm_vgic_vcpu_init(struct kvm_vcpu *vcpu)
 {
 	struct vgic_cpu *vgic_cpu = &vcpu->arch.vgic_cpu;
 	int i;
+
+	if (!irqchip_in_kernel(vcpu->kvm))
+		return;
 
 	spin_lock_init(&vgic_cpu->lock);
 	for (i = 0; i < VGIC_NR_IRQS; i++)
@@ -645,7 +660,11 @@ out_free_vcpus:
 
 int kvm_vgic_init(struct kvm *kvm)
 {
-	int ret;
+	int ret = -EEXIST;
+
+	mutex_lock(&kvm->lock);
+	if (atomic_read(&kvm->online_vcpus))
+		goto out;
 
 	spin_lock_init(&kvm->arch.vgic.lock);
 	kvm->arch.vgic.vctrl_base = vgic_vctrl_base;
@@ -654,5 +673,7 @@ int kvm_vgic_init(struct kvm *kvm)
 				    VGIC_VCPU_BASE, VGIC_CPU_SIZE);
 	if (ret)
 		kvm_err("Unable to remap VGIC CPU to VCPU\n");
+out:
+	mutex_unlock(&kvm->lock);
 	return ret;
 }

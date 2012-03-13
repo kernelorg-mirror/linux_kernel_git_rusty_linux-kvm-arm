@@ -106,10 +106,6 @@ int kvm_arch_init_vm(struct kvm *kvm, unsigned long type)
 		goto out_fail_alloc;
 	mutex_init(&kvm->arch.pgd_mutex);
 
-	ret = kvm_vgic_init(kvm);
-	if (ret)
-		goto out_free_stage2_pgd;
-		
 	ret = create_hyp_mappings(kvm_hyp_pgd, kvm, kvm + 1);
 	if (ret)
 		goto out_free_stage2_pgd;
@@ -572,7 +568,23 @@ static int kvm_arch_vm_ioctl_irq_line(struct kvm *kvm,
 long kvm_arch_vcpu_ioctl(struct file *filp,
 			 unsigned int ioctl, unsigned long arg)
 {
-	return -EINVAL;
+	struct kvm_vcpu *vcpu = filp->private_data;
+	void __user *argp = (void __user *)arg;
+
+	switch (ioctl) {
+#ifdef CONFIG_KVM_ARM_VGIC
+	case KVM_INTERRUPT: {
+		struct kvm_interrupt irq;
+
+		if (copy_from_user(&irq, argp, sizeof(irq)))
+			return -EFAULT;
+		kvm_vgic_inject_irq(vcpu->kvm, vcpu->vcpu_id, irq.irq);
+		return 0;
+	}
+#endif
+	default:
+		return -EINVAL;
+	}
 }
 
 int kvm_vm_ioctl_get_dirty_log(struct kvm *kvm, struct kvm_dirty_log *log)
@@ -586,7 +598,11 @@ long kvm_arch_vm_ioctl(struct file *filp,
 	struct kvm *kvm = filp->private_data;
 	void __user *argp = (void __user *)arg;
 
-	switch (ioctl) {
+	switch (ioctl) {	
+#ifdef CONFIG_KVM_ARM_VGIC
+	case KVM_CREATE_IRQCHIP:
+		return kvm_vgic_init(kvm);
+#endif
 	case KVM_IRQ_LINE: {
 		struct kvm_irq_level irq_event;
 

@@ -133,6 +133,8 @@ void kvm_vgic_sync_to_cpu(struct kvm_vcpu *vcpu);
 void kvm_vgic_sync_from_cpu(struct kvm_vcpu *vcpu);
 void kvm_vgic_inject_irq(struct kvm *kvm, u8 cpuid, unsigned int irq);
 int vgic_handle_mmio(struct kvm_vcpu *vcpu, struct kvm_run *run);
+
+#define irqchip_in_kernel(k)	(!!((k)->arch.vgic.vctrl_base))
 #else
 static inline int kvm_vgic_hyp_init(void)
 {
@@ -151,6 +153,11 @@ static inline void kvm_vgic_sync_from_cpu(struct kvm_vcpu *vcpu) {}
 static inline int vgic_handle_mmio(struct kvm_vcpu *vcpu, struct kvm_run *run)
 {
 	return KVM_EXIT_MMIO;
+}
+
+static inline int irqchip_in_kernel(struct kvm *kvm)
+{
+	return 0;
 }
 #endif
 
