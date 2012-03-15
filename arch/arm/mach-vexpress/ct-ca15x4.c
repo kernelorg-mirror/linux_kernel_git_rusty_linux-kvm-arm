@@ -45,7 +45,7 @@ static void __init ct_ca15x4_init_early(void)
 
 static void __init ct_ca15x4_init_irq(void)
 {
-	gic_init(0, 29, MMIO_P2V(A15_MPCORE_GIC_DIST),
+	gic_init(0, 16, MMIO_P2V(A15_MPCORE_GIC_DIST),
 		 MMIO_P2V(A15_MPCORE_GIC_CPU));
 }
 
