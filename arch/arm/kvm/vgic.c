@@ -848,19 +848,46 @@ int kvm_vgic_inject_irq(struct kvm *kvm, int cpuid, const struct kvm_irq_level *
 	return 0;
 }
 
-static irqreturn_t kvm_vgic_maintainance_handler(int irq, void *data)
+static irqreturn_t vgic_maintainance_handler(int irq, void *data)
 {
 	struct kvm_vcpu *vcpu = *(struct kvm_vcpu **)data;
+	struct vgic_dist *dist;
+	struct vgic_cpu *vgic_cpu;
 
-	WARN(!vcpu,
-	     "VGIC interrupt on CPU %d with no vcpu\n", smp_processor_id());
-	/*
-	 * Not much to do, as we handle everything on world switch.
-	 * It should be possible to do things lazily though, and move
-	 * away from world-switch.
-	 */
+	if (WARN(!vcpu,
+		 "VGIC interrupt on CPU %d with no vcpu\n", smp_processor_id()))
+		return IRQ_HANDLED;
 
-	kvm_debug("MISR = %08x\n", vcpu->arch.vgic_cpu.vgic_misr);
+	vgic_cpu = &vcpu->arch.vgic_cpu;
+	dist = &vcpu->kvm->arch.vgic;
+	kvm_debug("MISR = %08x\n", vgic_cpu->vgic_misr);
+
+	if (vgic_cpu->vgic_misr & VGIC_MISR_EOI) {
+		/*
+		 * Some level interrupts have been EOIed. Clear their
+		 * active bit.
+		 */
+		int lr, irq;
+
+		spin_lock(&dist->lock);
+		for_each_set_bit(lr, (unsigned long *)vgic_cpu->vgic_eisr,
+				 vgic_cpu->nr_lr) {
+			irq = vgic_cpu->vgic_lr[lr] & VGIC_LR_VIRTUALID;
+			
+			vgic_bitmap_set_irq_val(&dist->irq_active,
+						vcpu->vcpu_id, irq, 0);
+			vgic_cpu->vgic_lr[lr] &= ~VGIC_LR_EOI;
+			writel_relaxed(vgic_cpu->vgic_lr[lr],
+				       dist->vctrl_base + GICH_LR0 + (lr << 2));
+		}
+		spin_unlock(&dist->lock);
+	}
+
+	if (vgic_cpu->vgic_misr & VGIC_MISR_U) {
+		vgic_cpu->vgic_hcr &= ~VGIC_HCR_UIE;
+		writel_relaxed(vgic_cpu->vgic_hcr, dist->vctrl_base + GICH_HCR);
+	}
+
 	return IRQ_HANDLED;
 }
 
@@ -878,6 +905,10 @@ void kvm_vgic_vcpu_init(struct kvm_vcpu *vcpu)
 		if (i < 16)
 			vgic_bitmap_set_irq_val(&dist->irq_enabled,
 						vcpu->vcpu_id, i, 1);
+		if (i < 32)
+			vgic_bitmap_set_irq_val(&dist->irq_cfg,
+						vcpu->vcpu_id, i, 1);
+
 		vgic_cpu->vgic_irq_lr_map[i] = LR_EMPTY;
 	}
 
@@ -912,7 +943,7 @@ int kvm_vgic_hyp_init(void)
 	if (!irq)
 		return -ENXIO;
 
-	ret = request_percpu_irq(irq, kvm_vgic_maintainance_handler,
+	ret = request_percpu_irq(irq, vgic_maintainance_handler,
 				 "vgic", kvm_get_running_vcpus());
 	if (ret) {
 		kvm_err("Cannot register interrupt %d\n", irq);
