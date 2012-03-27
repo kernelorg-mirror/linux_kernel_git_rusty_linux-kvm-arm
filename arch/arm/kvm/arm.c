@@ -51,6 +51,8 @@ static DEFINE_PER_CPU(struct kvm_vcpu *, kvm_arm_running_vcpu);
 static u64 next_vmid;		/* The next available VMID in the sequence */
 DEFINE_SPINLOCK(kvm_vmid_lock);
 
+static bool vgic_present;
+
 static void kvm_arm_set_running_vcpu(struct kvm_vcpu *vcpu)
 {
 	BUG_ON(preemptible());
@@ -176,6 +178,8 @@ int kvm_dev_ioctl_check_extension(long ext)
 	switch (ext) {
 #ifdef CONFIG_KVM_ARM_VGIC
 	case KVM_CAP_IRQCHIP:
+		r = vgic_present;
+		break;
 #endif
 	case KVM_CAP_USER_MEMORY:
 	case KVM_CAP_DESTROY_MEMORY_REGION_WORKS:
@@ -662,6 +666,13 @@ long kvm_arch_vm_ioctl(struct file *filp,
 	void __user *argp = (void __user *)arg;
 
 	switch (ioctl) {
+#ifdef CONFIG_KVM_ARM_VGIC
+	case KVM_CREATE_IRQCHIP:
+		if (vgic_present)
+			return kvm_vgic_init(kvm);
+		else
+			return -EINVAL;
+#endif
 	case KVM_IRQ_LINE: {
 		struct kvm_irq_level irq_event;
 
@@ -814,8 +825,8 @@ static int init_hyp_mode(void)
 	 * Init HYP view of VGIC
 	 */
 	err = kvm_vgic_hyp_init();
-	if (err)
-		goto out_free_mappings;
+	if (!err)
+		vgic_present = true;
 
 	/*
 	 * Set the HVBAR to the virtual kernel address
