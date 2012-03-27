@@ -128,4 +128,14 @@
 #define HSR_EC_DABT	(0x24)
 #define HSR_EC_DABT_HYP	(0x25)
 
+/* GICH offsets */
+#define GICH_HCR	0x0
+#define GICH_VTR	0x4
+#define GICH_VMCR	0x8
+#define GICH_MISR	0x10
+#define GICH_ELSR0 	0x30
+#define GICH_ELSR1 	0x34
+#define GICH_APR	0xf0
+#define GICH_LR0	0x100
+
 #endif /* __KVM_ARM_H__ */
