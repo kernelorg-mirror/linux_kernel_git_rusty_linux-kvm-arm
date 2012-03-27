@@ -22,6 +22,10 @@
 #include <linux/io.h>
 #include <asm/kvm_emulate.h>
 
+/* Temporary hacks, need to probe DT instead */
+#define VGIC_DIST_BASE		0x2c001000
+#define VGIC_DIST_SIZE		0x1000
+
 #define ACCESS_READ_VALUE	(1 << 0)
 #define ACCESS_READ_RAZ		(0 << 0)
 #define ACCESS_READ_MASK(x)	((x) & (1 << 0))
@@ -30,6 +34,9 @@
 #define ACCESS_WRITE_CLEARBIT	(2 << 1)
 #define ACCESS_WRITE_VALUE	(3 << 1)
 #define ACCESS_WRITE_MASK(x)	((x) & (3 << 1))
+
+static void vgic_update_state(struct kvm *kvm);
+static void vgic_dispatch_sgi(struct kvm_vcpu *vcpu, u32 reg);
 
 static void vgic_reg_access(struct kvm_exit_mmio *mmio, u32 *reg, u32 offset, int mode)
 {
@@ -82,6 +89,218 @@ static void vgic_reg_access(struct kvm_exit_mmio *mmio, u32 *reg, u32 offset, in
 	}
 }
 
+static void handle_mmio_misc(struct kvm_vcpu *vcpu,
+			     struct kvm_exit_mmio *mmio, u32 offset)
+{
+	u32 reg;
+	u32 u32off = offset & 3;
+
+	switch (offset & ~3) {
+	case 0:			/* CTLR */
+		reg = vcpu->kvm->arch.vgic.enabled;
+		vgic_reg_access(mmio, &reg, u32off,
+				ACCESS_READ_VALUE | ACCESS_WRITE_VALUE);
+		if (mmio->mmio.is_write) {
+			vcpu->kvm->arch.vgic.enabled = reg & 1;
+			vgic_update_state(vcpu->kvm);
+		}
+		break;
+
+	case 4:			/* TYPER */
+		reg  = (atomic_read(&vcpu->kvm->online_vcpus) - 1) << 5;
+		reg |= (VGIC_NR_IRQS >> 5) - 1;
+		vgic_reg_access(mmio, &reg, u32off,
+				ACCESS_READ_VALUE | ACCESS_WRITE_IGNORED);
+		break;
+
+	case 8:			/* IIDR */
+		reg = 0x4B00043B;
+		vgic_reg_access(mmio, &reg, u32off,
+				ACCESS_READ_VALUE | ACCESS_WRITE_IGNORED);
+		break;
+	}
+}
+
+static void handle_mmio_raz_wi(struct kvm_vcpu *vcpu,
+			       struct kvm_exit_mmio *mmio, u32 offset)
+{
+	vgic_reg_access(mmio, NULL, offset,
+			ACCESS_READ_RAZ | ACCESS_WRITE_IGNORED);
+}
+
+static void handle_mmio_set_enable_reg(struct kvm_vcpu *vcpu,
+				       struct kvm_exit_mmio *mmio, u32 offset)
+{
+	u32 *reg = vgic_bitmap_get_reg(&vcpu->kvm->arch.vgic.irq_enabled,
+				       vcpu->vcpu_id, offset);
+	vgic_reg_access(mmio, reg, offset,
+			ACCESS_READ_VALUE | ACCESS_WRITE_SETBIT);
+	if (mmio->mmio.is_write)
+		vgic_update_state(vcpu->kvm);
+}
+
+static void handle_mmio_clear_enable_reg(struct kvm_vcpu *vcpu,
+					 struct kvm_exit_mmio *mmio, u32 offset)
+{
+	u32 *reg = vgic_bitmap_get_reg(&vcpu->kvm->arch.vgic.irq_enabled,
+				       vcpu->vcpu_id, offset);
+	vgic_reg_access(mmio, reg, offset,
+			ACCESS_READ_VALUE | ACCESS_WRITE_CLEARBIT);
+	if (mmio->mmio.is_write) {
+		if (offset < 4) /* Force SGI enabled */
+			*reg |= 0xffff;
+		vgic_update_state(vcpu->kvm);
+	}
+}
+
+static void handle_mmio_set_pending_reg(struct kvm_vcpu *vcpu,
+					struct kvm_exit_mmio *mmio, u32 offset)
+{
+	u32 *reg = vgic_bitmap_get_reg(&vcpu->kvm->arch.vgic.irq_pending,
+				       vcpu->vcpu_id, offset);
+	vgic_reg_access(mmio, reg, offset,
+			ACCESS_READ_VALUE | ACCESS_WRITE_SETBIT);
+	if (mmio->mmio.is_write)
+		vgic_update_state(vcpu->kvm);
+}
+
+static void handle_mmio_clear_pending_reg(struct kvm_vcpu *vcpu,
+					  struct kvm_exit_mmio *mmio, u32 offset)
+{
+	u32 *reg = vgic_bitmap_get_reg(&vcpu->kvm->arch.vgic.irq_pending,
+				       vcpu->vcpu_id, offset);
+	vgic_reg_access(mmio, reg, offset,
+			ACCESS_READ_VALUE | ACCESS_WRITE_CLEARBIT);
+	if (mmio->mmio.is_write)
+		vgic_update_state(vcpu->kvm);
+}
+
+static void handle_mmio_priority_reg(struct kvm_vcpu *vcpu,
+				     struct kvm_exit_mmio *mmio, u32 offset)
+{
+	u32 *reg = vgic_bytemap_get_reg(&vcpu->kvm->arch.vgic.irq_priority,
+					vcpu->vcpu_id, offset);
+	vgic_reg_access(mmio, reg, offset,
+			ACCESS_READ_VALUE | ACCESS_WRITE_VALUE);
+}
+
+static void update_spi_target(struct kvm *kvm)
+{
+	struct vgic_dist *dist = &kvm->arch.vgic;
+	int c, i, nrcpus = atomic_read(&kvm->online_vcpus);
+	u8 targ;
+	unsigned long *bmap;
+
+	for (i = 32; i < VGIC_NR_IRQS; i++) {
+		targ = vgic_bytemap_get_irq_val(&dist->irq_target, 0, i);
+
+		for (c = 0; c < nrcpus; c++) {
+			bmap = dist->irq_spi_target[c].global.reg_ul;
+
+			if (targ & (1 << c))
+				set_bit(i - 32, bmap);
+			else
+				clear_bit(i - 32, bmap);
+		}
+	}
+}
+
+static void handle_mmio_target_reg(struct kvm_vcpu *vcpu,
+				   struct kvm_exit_mmio *mmio, u32 offset)
+{
+	u32 *reg;
+
+	/* We treat the banked interrupts targets as read-only */
+	if (offset < 32) {
+		u32 roreg = 1 << vcpu->vcpu_id;
+		roreg |= roreg << 8;
+		roreg |= roreg << 16;
+
+		vgic_reg_access(mmio, &roreg, offset,
+				ACCESS_READ_VALUE | ACCESS_WRITE_IGNORED);
+		return;
+	}
+
+	reg = vgic_bytemap_get_reg(&vcpu->kvm->arch.vgic.irq_target,
+				   vcpu->vcpu_id, offset);
+	vgic_reg_access(mmio, reg, offset,
+			ACCESS_READ_VALUE | ACCESS_WRITE_VALUE);
+	if (mmio->mmio.is_write) {
+		update_spi_target(vcpu->kvm);
+		vgic_update_state(vcpu->kvm);
+	}
+}
+
+static u32 vgic_cfg_expand(u16 val)
+{
+	u32 res = 0;
+	int i;
+
+	for (i = 0; i < 16; i++)
+		res |= (val >> i) << (2 * i + 1);
+
+	return res;
+}
+
+static u16 vgic_cfg_compress(u32 val)
+{
+	u16 res = 0;
+	int i;
+
+	for (i = 0; i < 16; i++)
+		res |= (val >> (i * 2 + 1)) << i;
+
+	return res;
+}
+
+/*
+ * The distributor uses 2 bits per IRQ for the CFG register, but the
+ * LSB is always 0. As such, we only keep the upper bit, and use the
+ * two above functions to compress/expand the bits
+ */
+static void handle_mmio_cfg_reg(struct kvm_vcpu *vcpu,
+				struct kvm_exit_mmio *mmio, u32 offset)
+{
+	u32 val;
+	u32 *reg = vgic_bitmap_get_reg(&vcpu->kvm->arch.vgic.irq_cfg,
+				       vcpu->vcpu_id, offset >> 1);
+	if (offset & 2)
+		val = *reg >> 16;
+	else
+		val = *reg & 0xffff;
+
+	val = vgic_cfg_expand(val);
+	vgic_reg_access(mmio, &val, offset,
+			ACCESS_READ_VALUE | ACCESS_WRITE_VALUE);
+	if (mmio->mmio.is_write) {
+		if (offset < 4) {
+			*reg = ~0U; /* Force PPIs/SGIs to 1 */
+			return;
+		}
+
+		val = vgic_cfg_compress(val);
+		if (offset & 2) {
+			*reg &= 0xffff;
+			*reg |= val << 16;
+		} else {
+			*reg &= 0xffff << 16;
+			*reg |= val;
+		}
+	}
+}
+
+static void handle_mmio_sgi_reg(struct kvm_vcpu *vcpu,
+				struct kvm_exit_mmio *mmio, u32 offset)
+{
+	u32 reg;
+	vgic_reg_access(mmio, &reg, offset,
+			ACCESS_READ_RAZ | ACCESS_WRITE_VALUE);
+	if (mmio->mmio.is_write) {
+		vgic_dispatch_sgi(vcpu, reg);
+		vgic_update_state(vcpu->kvm);
+	}
+}
+
 /* All this should be handled by kvm_bus_io_*()... FIXME!!! */
 struct mmio_range {
 	unsigned long base;
@@ -91,6 +310,66 @@ struct mmio_range {
 };
 
 static const struct mmio_range vgic_ranges[] = {
+	{			/* CTRL, TYPER, IIDR */
+		.base		= 0,
+		.len		= 12,
+		.handle_mmio	= handle_mmio_misc,
+	},
+	{			/* IGROUPRn */
+		.base		= 0x80,
+		.len		= VGIC_NR_IRQS / 8,
+		.handle_mmio	= handle_mmio_raz_wi,
+	},
+	{			/* ISENABLERn */
+		.base		= 0x100,
+		.len		= VGIC_NR_IRQS / 8,
+		.handle_mmio	= handle_mmio_set_enable_reg,
+	},
+	{			/* ICENABLERn */
+		.base		= 0x180,
+		.len		= VGIC_NR_IRQS / 8,
+		.handle_mmio	= handle_mmio_clear_enable_reg,
+	},
+	{			/* ISPENDRn */
+		.base		= 0x200,
+		.len		= VGIC_NR_IRQS / 8,
+		.handle_mmio	= handle_mmio_set_pending_reg,
+	},
+	{			/* ICPENDRn */
+		.base		= 0x280,
+		.len		= VGIC_NR_IRQS / 8,
+		.handle_mmio	= handle_mmio_clear_pending_reg,
+	},
+	{			/* ISACTIVERn */
+		.base		= 0x300,
+		.len		= VGIC_NR_IRQS / 8,
+		.handle_mmio	= handle_mmio_raz_wi,
+	},
+	{			/* ICACTIVERn */
+		.base		= 0x380,
+		.len		= VGIC_NR_IRQS / 8,
+		.handle_mmio	= handle_mmio_raz_wi,
+	},
+	{			/* IPRIORITYRn */
+		.base		= 0x400,
+		.len		= VGIC_NR_IRQS,
+		.handle_mmio	= handle_mmio_priority_reg,
+	},
+	{			/* ITARGETSRn */
+		.base		= 0x800,
+		.len		= VGIC_NR_IRQS,
+		.handle_mmio	= handle_mmio_target_reg,
+	},
+	{			/* ICFGRn */
+		.base		= 0xC00,
+		.len		= VGIC_NR_IRQS / 4,
+		.handle_mmio	= handle_mmio_cfg_reg,
+	},
+	{			/* SGIRn */
+		.base		= 0xF00,
+		.len		= 4,
+		.handle_mmio	= handle_mmio_sgi_reg,
+	},
 	{}
 };
 
@@ -123,5 +402,99 @@ struct mmio_range *find_matching_range(const struct mmio_range *ranges,
  */
 int vgic_handle_mmio(struct kvm_vcpu *vcpu, struct kvm_run *run, struct kvm_exit_mmio *mmio)
 {
-	return KVM_EXIT_MMIO;
+	const struct mmio_range *range;
+	struct vgic_dist *dist = &vcpu->kvm->arch.vgic;
+	unsigned long base = dist->vgic_dist_base;
+
+	if (!irqchip_in_kernel(vcpu->kvm) ||
+	    mmio->mmio.phys_addr < base ||
+	    (mmio->mmio.phys_addr + mmio->mmio.len) > (base + dist->vgic_dist_size))
+		return KVM_EXIT_MMIO;
+
+	range = find_matching_range(vgic_ranges, mmio, base);
+	if (unlikely(!range || !range->handle_mmio)) {
+		pr_warn("Unhandled access %d %08llx %d\n",
+			mmio->mmio.is_write, mmio->mmio.phys_addr, mmio->mmio.len);
+		return KVM_EXIT_MMIO;
+	}
+
+	spin_lock(&vcpu->kvm->arch.vgic.lock);
+	kvm_debug("emulating %d %08llx %d\n", mmio->mmio.is_write,
+		  mmio->mmio.phys_addr, mmio->mmio.len);
+	range->handle_mmio(vcpu, mmio, mmio->mmio.phys_addr - range->base - base);
+	run->mmio = mmio->mmio;
+	kvm_handle_mmio_return(vcpu, run);
+	spin_unlock(&vcpu->kvm->arch.vgic.lock);
+
+	return KVM_EXIT_UNKNOWN;
+}
+
+static void vgic_dispatch_sgi(struct kvm_vcpu *vcpu, u32 reg)
+{
+	struct kvm *kvm = vcpu->kvm;
+	struct vgic_dist *dist = &kvm->arch.vgic;
+	int nrcpus = atomic_read(&kvm->online_vcpus);
+	u8 target_cpus;
+	int sgi, mode, c, vcpu_id;
+
+	vcpu_id = vcpu->vcpu_id;
+
+	sgi = reg & 0xf;
+	target_cpus = (reg >> 16) & 0xff;
+	mode = (reg >> 24) & 3;
+
+	switch (mode) {
+	case 0:
+		if (!target_cpus)
+			return;
+
+	case 1:
+		target_cpus = ((1 << nrcpus) - 1) & ~(1 << vcpu_id) & 0xff;
+		break;
+
+	case 2:
+		target_cpus = 1 << vcpu_id;
+		break;
+	}
+
+	for (c = 0; c < nrcpus; c++) {
+		if (target_cpus & 1) {
+			/* Flag the SGI as pending */
+			vgic_bitmap_set_irq_val(&dist->irq_pending, c, sgi, 1);
+			dist->irq_sgi_sources[c][sgi] |= 1 << vcpu_id;
+			pr_debug("SGI%d from CPU%d to CPU%d\n", sgi, vcpu_id, c);
+		}
+
+		target_cpus >>= 1;
+	}
+}
+
+static int compute_pending_for_cpu(struct kvm_vcpu *vcpu)
+{
+	return 0;
+}
+
+/*
+ * Update the interrupt state and determine which CPUs have pending
+ * interrupts. Must be called with distributor lock held.
+ */
+static void vgic_update_state(struct kvm *kvm)
+{
+	struct vgic_dist *dist = &kvm->arch.vgic;
+	int nrcpus = atomic_read(&kvm->online_vcpus);
+	int c;
+
+	if (!dist->enabled) {
+		set_bit(0, &dist->irq_pending_on_cpu);
+		return;
+	}
+
+	for (c = 0; c < nrcpus; c++) {
+		struct kvm_vcpu *vcpu = kvm_get_vcpu(kvm, c);
+
+		if (compute_pending_for_cpu(vcpu)) {
+			pr_debug("CPU%d has pending interrupts\n", c);
+			set_bit(1 << c, &dist->irq_pending_on_cpu);
+		}
+	}
 }
