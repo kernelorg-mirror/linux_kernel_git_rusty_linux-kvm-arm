@@ -541,11 +541,12 @@ static int compute_pending_for_cpu(struct kvm_vcpu *vcpu)
 	enabled = vgic_bitmap_get_cpu_map(&dist->irq_enabled, vcpu_id);
 	bitmap_and(pend, pending, enabled, 32);
 	
-	pending = dist->irq_pending.global.reg_ul;
-	enabled = dist->irq_enabled.global.reg_ul;
-	bitmap_and(pend + 1, pending, enabled, VGIC_NR_IRQS - 32);
-	bitmap_and(pend + 1, pend + 1, dist->irq_spi_target[vcpu_id].global.reg_ul,
-		   VGIC_NR_IRQS - 32);
+	pending = vgic_bitmap_get_shared_map(&dist->irq_pending);
+	enabled = vgic_bitmap_get_shared_map(&dist->irq_enabled);
+	bitmap_and(pend + 1, pending, enabled, VGIC_NR_SHARED_IRQS);
+	bitmap_and(pend + 1, pend + 1,
+		   vgic_bitmap_get_shared_map(&dist->irq_spi_target[vcpu_id],
+		   VGIC_NR_SHARED_IRQS);
 
 	return (find_first_bit(pend, VGIC_NR_IRQS) < VGIC_NR_IRQS);
 }
@@ -671,7 +672,7 @@ static void __kvm_vgic_sync_to_cpu(struct kvm_vcpu *vcpu)
 
 	
 	/* SPIs */
-	pending = dist->irq_pending.global.reg_ul;
+	pending = vgic_bitmap_get_shared_map(&dist->irq_pending);
 	for_each_set_bit_from(i, vgic_cpu->pending, VGIC_NR_IRQS) {
 		if (vgic_queue_irq(vcpu, 0, i)) {
 			overflow = 1;
