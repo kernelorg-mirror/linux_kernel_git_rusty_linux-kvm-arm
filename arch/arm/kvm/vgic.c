@@ -21,9 +21,23 @@
 #include <linux/interrupt.h>
 #include <linux/io.h>
 
+#include <asm/hardware/gic.h>
+#include <asm/kvm_arm.h>
+#include <asm/kvm_mmu.h>
+
 /* Temporary hacks, need to probe DT instead */
 #define VGIC_DIST_BASE		0x2c001000
 #define VGIC_DIST_SIZE		0x1000
+#define VGIC_CPU_BASE		0x2c002000
+#define VGIC_CPU_SIZE		0x2000
+#define VGIC_VCTRL_BASE		0x2c004000
+#define VGIC_VCTRL_SIZE		0x2000
+#define VGIC_VCPU_BASE		0x2c006000
+#define VGIC_VCPU_SIZE		0x2000
+#define VGIC_MAINT_IRQ		25
+
+static struct kvm_vcpu __percpu **vgic_vcpus;
+static void __iomem *vgic_vctrl_base;
 
 #define ACCESS_READ_VALUE	(1 << 0)
 #define ACCESS_READ_RAZ		(0 << 0)
@@ -717,4 +731,110 @@ int kvm_vgic_inject_irq(struct kvm *kvm, int cpuid, const struct kvm_irq_level *
 	kvm_vgic_kick_vcpus(kvm);
 
 	return 0;
+}
+
+static irqreturn_t kvm_vgic_maintainance_handler(int irq, void *data)
+{
+	struct kvm_vcpu *vcpu = *(struct kvm_vcpu **)data;
+
+	WARN(!vcpu,
+	     "VGIC interrupt on CPU %d with no vcpu\n", smp_processor_id());
+	/*
+	 * Not much to do, as we handle everything on world switch.
+	 * It should be possible to do things lazily though, and move
+	 * away from world-switch.
+	 */
+	return IRQ_HANDLED;
+}
+
+void kvm_vgic_vcpu_init(struct kvm_vcpu *vcpu)
+{
+	struct vgic_cpu *vgic_cpu = &vcpu->arch.vgic_cpu;
+	struct vgic_dist *dist = &vcpu->kvm->arch.vgic;
+	
+	int i;
+
+	if (!irqchip_in_kernel(vcpu->kvm))
+		return;
+
+	spin_lock_init(&vgic_cpu->lock);
+	for (i = 0; i < VGIC_NR_IRQS; i++) {
+		if (i < 16)
+			vgic_bitmap_set_irq_val(&dist->irq_enabled,
+						vcpu->vcpu_id, i, 1);
+		vgic_cpu->vgic_irq_lr_map[i] = 0xff;
+	}
+
+	BUG_ON(!vcpu->kvm->arch.vgic.vctrl_base);
+	vgic_cpu->nr_lr = (readl_relaxed(vcpu->kvm->arch.vgic.vctrl_base + GICH_VTR) & 0x1f) + 1;
+	for (i = 0; i < vgic_cpu->nr_lr; i++)
+		vgic_cpu->vgic_lr_irq_map[i] = VGIC_NR_IRQS;
+
+	vgic_cpu->vgic_mcr = readl_relaxed(vcpu->kvm->arch.vgic.vctrl_base + GICH_VMCR);
+	vgic_cpu->vgic_mcr |= 0xf << 28; /* Priority */
+	vgic_cpu->vgic_hcr |= VGIC_HCR_EN; /* Get the show on the road... */
+}
+
+int kvm_vgic_hyp_init(void)
+{
+	int ret;
+
+	vgic_vcpus = alloc_percpu(struct kvm_vcpu *);
+	if (!vgic_vcpus) {
+		kvm_err("Cannot allocate vgic_vcpus\n");
+		return -ENOMEM;
+	}
+
+	ret = request_percpu_irq(VGIC_MAINT_IRQ, kvm_vgic_maintainance_handler,
+				 "vgic", vgic_vcpus);
+	if (ret) {
+		kvm_err("Cannot register interrupt %d\n", VGIC_MAINT_IRQ);
+		goto out_free_vcpus;
+	}
+	
+	vgic_vctrl_base = ioremap(VGIC_VCTRL_BASE, VGIC_VCTRL_SIZE);
+	if (!vgic_vctrl_base) {
+		kvm_err("Cannot ioremap VCTRL\n");
+		goto out_free_irq;
+	}
+
+	ret = create_hyp_io_mappings(kvm_hyp_pgd,
+				     vgic_vctrl_base,
+				     vgic_vctrl_base + VGIC_VCTRL_SIZE,
+				     VGIC_VCTRL_BASE);
+	if (ret) {
+		kvm_err("Cannot map VCTRL into hyp\n");
+		goto out_unmap;
+	}
+
+	return 0;
+
+out_unmap:
+	iounmap(vgic_vctrl_base);	
+out_free_irq:
+	free_percpu_irq(VGIC_MAINT_IRQ, vgic_vcpus);
+out_free_vcpus:
+	free_percpu(vgic_vcpus);
+
+	return ret;
+}
+
+int kvm_vgic_init(struct kvm *kvm)
+{
+	int ret = -EEXIST;
+
+	mutex_lock(&kvm->lock);
+	if (atomic_read(&kvm->online_vcpus))
+		goto out;
+
+	spin_lock_init(&kvm->arch.vgic.lock);
+	kvm->arch.vgic.vctrl_base = vgic_vctrl_base;
+
+	ret = kvm_phys_addr_ioremap(kvm, VGIC_CPU_BASE,
+				    VGIC_VCPU_BASE, VGIC_CPU_SIZE);
+	if (ret)
+		kvm_err("Unable to remap VGIC CPU to VCPU\n");
+out:
+	mutex_unlock(&kvm->lock);
+	return ret;
 }
