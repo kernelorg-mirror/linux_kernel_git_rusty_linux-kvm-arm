@@ -54,24 +54,28 @@ static inline u32 *vgic_bitmap_get_reg(struct vgic_bitmap *x,
 static inline int vgic_bitmap_get_irq_val(struct vgic_bitmap *x,
 					 int cpuid, int irq)
 {
-	u32 *reg, offset, shift;
+	if (irq < 32)
+		return test_bit(irq, x->percpu[cpuid].reg_ul);
 
-	offset = (irq / 32) << 2;
-	shift = irq & 31;
-	reg = vgic_bitmap_get_reg(x, cpuid, offset);
-	return !!(*reg & (1 << shift));
+	return test_bit(irq - 32, x->shared.reg_ul);
 }
 
 static inline void vgic_bitmap_set_irq_val(struct vgic_bitmap *x,
 					   int cpuid, int irq, int val)
 {
-	u32 *reg, offset, shift;
+	unsigned long *reg;
 
-	offset = (irq / 32) << 2;
-	shift = irq & 31;
-	reg = vgic_bitmap_get_reg(x, cpuid, offset);
-	*reg &= ~(1 << shift);
-	*reg |= (!!val) << shift;
+	if (irq < 32)
+		reg = x->percpu[cpuid].reg_ul;
+	else {
+		reg =  x->shared.reg_ul;
+		irq -= 32;
+	}
+
+	if (val)
+		set_bit(irq, reg);
+	else
+		clear_bit(irq, reg);
 }
 
 static inline unsigned long *vgic_bitmap_get_cpu_map(struct vgic_bitmap *x,
@@ -106,7 +110,7 @@ static inline u32 *vgic_bytemap_get_reg(struct vgic_bytemap *x,
 	if (offset < 4)
 		return x->percpu[cpuid].reg + offset;
 	else
-		return x->shared.reg + offset - 4;
+		return x->shared.reg + offset - 8;
 }
 
 static inline int vgic_bytemap_get_irq_val(struct vgic_bytemap *x,
