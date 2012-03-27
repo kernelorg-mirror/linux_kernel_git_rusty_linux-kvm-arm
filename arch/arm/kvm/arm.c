@@ -582,7 +582,23 @@ static int kvm_arch_vm_ioctl_irq_line(struct kvm *kvm,
 long kvm_arch_vcpu_ioctl(struct file *filp,
 			 unsigned int ioctl, unsigned long arg)
 {
-	return -EINVAL;
+	struct kvm_vcpu *vcpu = filp->private_data;
+	void __user *argp = (void __user *)arg;
+
+	switch (ioctl) {
+#ifdef CONFIG_KVM_ARM_VGIC
+	case KVM_INTERRUPT: {
+		struct kvm_interrupt irq;
+
+		if (copy_from_user(&irq, argp, sizeof(irq)))
+			return -EFAULT;
+		kvm_vgic_inject_irq(vcpu->kvm, vcpu->vcpu_id, irq.irq);
+		return 0;
+	}
+#endif
+	default:
+		return -EINVAL;
+	}
 }
 
 int kvm_vm_ioctl_get_dirty_log(struct kvm *kvm, struct kvm_dirty_log *log)
@@ -597,6 +613,18 @@ long kvm_arch_vm_ioctl(struct file *filp,
 	void __user *argp = (void __user *)arg;
 
 	switch (ioctl) {
+#ifdef CONFIG_KVM_ARM_VGIC
+	case KVM_INTERRUPT: {
+		struct kvm_interrupt irq;
+
+		if (copy_from_user(&irq, argp, sizeof(irq)))
+			return -EFAULT;
+		if (irq.irq <= 32)
+			return -EINVAL;
+		kvm_vgic_inject_irq(kvm, 0, irq.irq);
+		return 0;
+	}
+#endif
 	case KVM_IRQ_LINE: {
 		struct kvm_irq_level irq_event;
 
