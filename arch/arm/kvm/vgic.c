@@ -416,12 +416,35 @@ static void vgic_dispatch_sgi(struct kvm_vcpu *vcpu, u32 reg)
 
 static int compute_pending_for_cpu(struct kvm_vcpu *vcpu)
 {
-	return 0;
+	struct vgic_dist *dist = &vcpu->kvm->arch.vgic;
+	unsigned long *pending, *enabled, *pend;
+	int vcpu_id;
+
+	vcpu_id = vcpu->vcpu_id;
+	pend = vcpu->arch.vgic_cpu.pending;
+
+	pending = vgic_bitmap_get_cpu_map(&dist->irq_pending, vcpu_id);
+	enabled = vgic_bitmap_get_cpu_map(&dist->irq_enabled, vcpu_id);
+	bitmap_and(pend, pending, enabled, 32);
+	
+	pending = dist->irq_pending.global.reg_ul;
+	enabled = dist->irq_enabled.global.reg_ul;
+	bitmap_and(pend + 1, pending, enabled, VGIC_NR_IRQS - 32);
+	bitmap_and(pend + 1, pend + 1, dist->irq_spi_target[vcpu_id].global.reg_ul,
+		   VGIC_NR_IRQS - 32);
+
+	return (find_first_bit(pend, VGIC_NR_IRQS) < VGIC_NR_IRQS);
 }
 
 /*
  * Update the interrupt state and determine which CPUs have pending
  * interrupts. Must be called with distributor lock held.
+ *
+ * It would be very tempting to just compute the pending bitmap once,
+ * but that would make it quite ugly locking wise when a vcpu actually
+ * moves the interrupt to its list registers (think of a single
+ * interrupt pending on several vcpus). So we end up computing the
+ * pending list twice (once here, and once in __kvm_vgic_sync_to_cpu).
  */
 static void vgic_update_state(struct kvm *kvm)
 {
@@ -442,4 +465,209 @@ static void vgic_update_state(struct kvm *kvm)
 			atomic_or((1 << c), &dist->irq_pending_on_cpu);
 		}
 	}
+}
+
+/*
+ * Queue an interrupt to a CPU virtual interface. Return 0 on success,
+ * or 1 if it wasn't possible to queue it.
+ */
+static int kvm_gic_queue_irq(struct kvm_vcpu *vcpu, u8 cpuid, int irq)
+{
+	struct vgic_cpu *vgic_cpu = &vcpu->arch.vgic_cpu;
+	int lr = vgic_cpu->vgic_irq_lr_map[irq];
+
+	pr_debug("Queue IRQ%d\n", irq);
+
+	/* Sanitize cpuid... */
+	cpuid &= 7;
+
+	/* Do we have an active interrupt for the same CPUID? */
+	if (lr != 0xff &&
+	    (vgic_cpu->vgic_lr[lr] & VGIC_LR_PHYSID_CPUID) == (cpuid << 10)) {
+		pr_debug("LR%d piggyback for IRQ%d %x\n", lr, irq, cpuid); 
+		vgic_cpu->vgic_lr[lr] |= VGIC_LR_PENDING_BIT;
+		return 0;
+	}
+
+	/* Try to use another LR for this interrupt */
+	lr = find_first_bit((unsigned long *)vgic_cpu->vgic_elsr,
+			       vgic_cpu->nr_lr);
+	if (lr >= vgic_cpu->nr_lr)
+		return 1;
+
+	pr_debug("LR%d allocated for IRQ%d %x\n", lr, irq, cpuid);
+	vgic_cpu->vgic_lr[lr] = (VGIC_LR_PENDING_BIT |  (cpuid << 10) | irq);
+	vgic_cpu->vgic_irq_lr_map[irq] = lr;
+	vgic_cpu->vgic_lr_irq_map[lr] = irq;
+	clear_bit(lr, (unsigned long *)vgic_cpu->vgic_elsr);
+
+	return 0;
+}
+
+/*
+ * Fill the list registers with pending interrupts before running the
+ * guest.
+ */
+static void __kvm_vgic_sync_to_cpu(struct kvm_vcpu *vcpu)
+{
+	struct vgic_cpu *vgic_cpu = &vcpu->arch.vgic_cpu;
+	struct vgic_dist *dist = &vcpu->kvm->arch.vgic;
+	unsigned long *pending;
+	int i, c, vcpu_id;
+	int overflow = 0;
+
+	vcpu_id = vcpu->vcpu_id;
+
+	/*
+	 * We may not have any pending interrupt, or the interrupts
+	 * may have been serviced from another vcpu. In all cases,
+	 * move along.
+	 */
+	if (!kvm_vgic_vcpu_pending_irq(vcpu) ||
+	    !compute_pending_for_cpu(vcpu)) {
+		pr_debug("CPU%d has no pending interrupt\n", vcpu->vcpu_id);
+		goto epilog;
+	}
+
+	/* SGIs */
+	pending = vgic_bitmap_get_cpu_map(&dist->irq_pending, vcpu_id);
+	for (i = find_first_bit(vgic_cpu->pending, 16);
+	     i < 16;
+	     i = find_next_bit(vgic_cpu->pending, 16, i + 1)) {
+		unsigned long sources;
+
+		pr_debug("SGI%d on CPU%d\n", i, vcpu_id);
+		sources = dist->irq_sgi_sources[vcpu_id][i];
+		for (c = find_first_bit(&sources, 8);
+		     c < 8;
+		     c = find_next_bit(&sources, 8, c + 1)) {
+			if (kvm_gic_queue_irq(vcpu, c, i)) {
+				overflow = 1;
+				continue;
+			}
+
+			sources &= ~(1 << c);
+		}
+
+		if (!sources)
+			clear_bit(i, pending);
+
+		dist->irq_sgi_sources[vcpu_id][i] = sources;
+	}
+
+	/* PPIs */
+	for (i = find_next_bit(vgic_cpu->pending, 32, 16);
+	     i < 32;
+	     i = find_next_bit(vgic_cpu->pending, 32, i + 1)) {
+		if (kvm_gic_queue_irq(vcpu, 0, i)) {
+			overflow = 1;
+			continue;
+		}
+
+		clear_bit(i, pending);
+	}
+
+	
+	/* SPIs */
+	pending = dist->irq_pending.global.reg_ul;
+	for (i = find_next_bit(vgic_cpu->pending, VGIC_NR_IRQS, 32);
+	     i < VGIC_NR_IRQS;
+	     i = find_next_bit(vgic_cpu->pending, VGIC_NR_IRQS, i + 1)) {
+		if (kvm_gic_queue_irq(vcpu, 0, i)) {
+			overflow = 1;
+			continue;
+		}
+
+		clear_bit(i - 32, pending);
+	}
+
+epilog:
+	if (overflow)
+		vgic_cpu->vgic_hcr |= VGIC_HCR_UIE;
+	else {
+		vgic_cpu->vgic_hcr &= ~VGIC_HCR_UIE;
+		/*
+		 * We're about to run this VCPU, and we've consumed
+		 * everything the distributor had in store for
+		 * us. Claim we don't have anything pending. We'll
+		 * adjust that if needed while exiting.
+		 */
+		atomic_clear_mask(1 << vcpu_id,
+				  (unsigned long *)&dist->irq_pending_on_cpu);
+	}
+}
+
+/*
+ * Sync back the VGIC state after a guest run.
+ */
+static void __kvm_vgic_sync_from_cpu(struct kvm_vcpu *vcpu)
+{
+	struct vgic_cpu *vgic_cpu = &vcpu->arch.vgic_cpu;
+	struct vgic_dist *dist = &vcpu->kvm->arch.vgic;
+	int empty, pending;
+
+	/* Clear mappings for empty LRs */
+	empty = find_first_bit((unsigned long *)vgic_cpu->vgic_elsr,
+			       vgic_cpu->nr_lr);
+	while (empty < vgic_cpu->nr_lr) {
+		int lr = empty;
+		int irq = vgic_cpu->vgic_lr_irq_map[lr];
+
+		if (irq < VGIC_NR_IRQS)
+			vgic_cpu->vgic_irq_lr_map[irq] = 0xff;
+
+		vgic_cpu->vgic_lr_irq_map[lr] = VGIC_NR_IRQS;
+		empty = find_next_bit((unsigned long *)vgic_cpu->vgic_elsr,
+				      vgic_cpu->nr_lr, empty + 1);
+	}
+
+	/* Check if we still have something up our sleeve... */
+	pending = find_first_zero_bit((unsigned long *)vgic_cpu->vgic_elsr,
+				      vgic_cpu->nr_lr);
+	if (pending < vgic_cpu->nr_lr)
+		atomic_or(1 << vcpu->vcpu_id, &dist->irq_pending_on_cpu);
+}
+
+void kvm_vgic_sync_to_cpu(struct kvm_vcpu *vcpu)
+{
+	struct vgic_dist *dist = &vcpu->kvm->arch.vgic;
+	struct vgic_cpu *vgic_cpu = &vcpu->arch.vgic_cpu;
+
+	if (!irqchip_in_kernel(vcpu->kvm))
+		return;
+
+	spin_lock(&dist->lock);
+	spin_lock(&vgic_cpu->lock);
+	__kvm_vgic_sync_to_cpu(vcpu);
+	spin_unlock(&vgic_cpu->lock);
+	spin_unlock(&dist->lock);
+
+	*__this_cpu_ptr(vgic_vcpus) = vcpu;
+}	
+
+void kvm_vgic_sync_from_cpu(struct kvm_vcpu *vcpu)
+{
+	struct vgic_dist *dist = &vcpu->kvm->arch.vgic;
+	struct vgic_cpu *vgic_cpu = &vcpu->arch.vgic_cpu;
+
+	if (!irqchip_in_kernel(vcpu->kvm))
+		return;
+
+	spin_lock(&dist->lock);
+	spin_lock(&vgic_cpu->lock);
+	__kvm_vgic_sync_from_cpu(vcpu);
+	spin_unlock(&vgic_cpu->lock);
+	spin_unlock(&dist->lock);
+
+	*__this_cpu_ptr(vgic_vcpus) = NULL;
+}
+
+int kvm_vgic_vcpu_pending_irq(struct kvm_vcpu *vcpu)
+{
+	struct vgic_dist *dist = &vcpu->kvm->arch.vgic;
+
+	if (!irqchip_in_kernel(vcpu->kvm))
+		return 0;
+
+	return !!(atomic_read(&dist->irq_pending_on_cpu) & (1 << vcpu->vcpu_id));
 }

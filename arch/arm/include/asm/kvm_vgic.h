@@ -106,14 +106,44 @@ struct vgic_dist {
 };
 
 struct vgic_cpu {
+#ifdef CONFIG_KVM_ARM_VGIC
+	spinlock_t	lock;
+
+	u8		vgic_irq_lr_map[VGIC_NR_IRQS];	/* per IRQ to LR mapping */
+	u8		vgic_lr_irq_map[64];		/* per LR to IRQ mapping */
+	DECLARE_BITMAP(	pending, VGIC_NR_IRQS);
+
+	int		nr_lr;
+
+	/* CPU vif control registers for world switch */
+	u32		vgic_hcr;
+	u32		vgic_mcr;
+	u32		vgic_misr;	/* Saved only */
+	u32		vgic_elsr[2];	/* Saved only */
+	u32		vgic_apr;
+	u32		vgic_lr[64];	/* Silly, A15 has only 4... */
+#endif
 };
+
+#define VGIC_HCR_EN		(1 << 0)
+#define VGIC_HCR_UIE		(1 << 1)
+
+#define VGIC_LR_PHYSID_CPUID	(7 << 10)
+#define VGIC_LR_STATE		(3 << 28)
+#define VGIC_LR_PENDING_BIT	(1 << 28)
+#define VGIC_LR_ACTIVE_BIT	(1 << 29)
 
 struct kvm;
 struct kvm_vcpu;
 struct kvm_run;
 
 #ifdef CONFIG_KVM_ARM_VGIC
+void kvm_vgic_sync_to_cpu(struct kvm_vcpu *vcpu);
+void kvm_vgic_sync_from_cpu(struct kvm_vcpu *vcpu);
+int kvm_vgic_vcpu_pending_irq(struct kvm_vcpu *vcpu);
 int vgic_handle_mmio(struct kvm_vcpu *vcpu, struct kvm_run *run);
+
+#define irqchip_in_kernel(k)	(!!((k)->arch.vgic.vctrl_base))
 #else
 static inline int kvm_vgic_hyp_init(void)
 {
