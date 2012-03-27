@@ -35,6 +35,7 @@
 #define ACCESS_WRITE_MASK(x)	((x) & (3 << 1))
 
 static void vgic_update_state(struct kvm *kvm);
+static void kvm_vgic_kick_vcpus(struct kvm *kvm);
 static void vgic_dispatch_sgi(struct kvm_vcpu *vcpu, u32 reg);
 
 static void mmio_do_copy(struct kvm_run *run, u32 *reg, u32 offset, int mode)
@@ -371,6 +372,8 @@ int vgic_handle_mmio(struct kvm_vcpu *vcpu, struct kvm_run *run)
 	kvm_handle_mmio_return(vcpu, run);
 	spin_unlock(&vcpu->kvm->arch.vgic.lock);
 
+	kvm_vgic_kick_vcpus(vcpu->kvm);
+
 	return KVM_EXIT_UNKNOWN;
 }
 
@@ -670,4 +673,48 @@ int kvm_vgic_vcpu_pending_irq(struct kvm_vcpu *vcpu)
 		return 0;
 
 	return !!(atomic_read(&dist->irq_pending_on_cpu) & (1 << vcpu->vcpu_id));
+}
+
+static void kvm_vgic_kick_vcpus(struct kvm *kvm)
+{
+	int nrcpus = atomic_read(&kvm->online_vcpus);
+	int c;
+
+	/*
+	 * We've injected an interrupt, time to find out who deserves
+	 * a good kick...
+	 */
+	for (c = 0; c < nrcpus; c++) {
+		struct kvm_vcpu *vcpu = kvm_get_vcpu(kvm, c);
+
+		if (kvm_vgic_vcpu_pending_irq(vcpu)) {
+			vcpu->arch.wait_for_interrupts = 0;
+			kvm_vcpu_kick(vcpu);
+		}
+	}
+}
+
+int kvm_vgic_inject_irq(struct kvm *kvm, int cpuid, const struct kvm_irq_level *irq)
+{
+	int nrcpus = atomic_read(&kvm->online_vcpus);
+
+	if (WARN_ON(cpuid >= nrcpus))
+		return -EINVAL;
+
+	/* Only PPIs or SPIs */
+	if (WARN_ON(irq->irq >= VGIC_NR_IRQS || irq->irq < 16))
+		return -EINVAL;
+
+	if (!irq->level)
+		return 0;
+
+	pr_debug("Inject IRQ%d\n", irq->irq);
+	spin_lock(&kvm->arch.vgic.lock);
+	vgic_bitmap_set_irq_val(&kvm->arch.vgic.irq_pending, cpuid, irq->irq, 1);
+	vgic_update_state(kvm);
+	spin_unlock(&kvm->arch.vgic.lock);
+
+	kvm_vgic_kick_vcpus(kvm);
+
+	return 0;
 }
