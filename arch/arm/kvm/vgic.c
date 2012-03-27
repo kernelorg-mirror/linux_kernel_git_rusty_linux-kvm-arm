@@ -804,8 +804,7 @@ static void vgic_kick_vcpus(struct kvm *kvm)
 	 * a good kick...
 	 */
 	kvm_for_each_vcpu(c, vcpu, kvm) {
-		if (kvm_vgic_vcpu_pending_irq(vcpu) &&
-		    vcpu->arch.wait_for_interrupts) {
+		if (kvm_vgic_vcpu_pending_irq(vcpu)) {
 			vcpu->arch.wait_for_interrupts = 0;
 			kvm_vcpu_kick(vcpu);
 		}
