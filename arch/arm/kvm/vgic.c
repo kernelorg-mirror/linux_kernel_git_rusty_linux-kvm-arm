@@ -215,7 +215,7 @@ static u32 vgic_get_target_reg(struct kvm *kvm, int irq)
 	irq -= 32;
 
 	for (c = 0; c < nrcpus; c++) {
-		bmap = dist->irq_spi_target[c].global.reg_ul;
+		bmap = vgic_bitmap_get_shared_map(&dist->irq_spi_target[c]);
 		for (i = 0; i < 4; i++)
 			if (test_bit(irq + i, bmap))
 				val |= 1 << (c + i * 8);
@@ -248,7 +248,7 @@ static void vgic_set_target_reg(struct kvm *kvm, u32 val, int irq)
 	}
 
 	for (c = 0; c < nrcpus; c++) {
-		bmap = dist->irq_spi_target[c].global.reg_ul;
+		bmap = vgic_bitmap_get_shared_map(&dist->irq_spi_target[c]);
 		for (i = 0; i < 4; i++) {
 			if (val & (1 << (c + i * 8)))
 				set_bit(irq + i, bmap);
