@@ -8,7 +8,7 @@
 #include <linux/types.h>
 
 #define VGIC_NR_IRQS		128
-#define VGIC_NR_GLOBAL_IRQS	(VGIC_NR_IRQS - 32)
+#define VGIC_NR_SHARED_IRQS	(VGIC_NR_IRQS - 32)
 #define VGIC_MAX_CPUS		KVM_MAX_VCPUS
 
 /* Sanity checks... */
@@ -27,7 +27,7 @@
 /*
  * The GIC distributor registers describing interrupts have two parts:
  * - 32 per-CPU interrupts (SGI + PPI)
- * - a bunch of global interrups (SPI)
+ * - a bunch of shared interrups (SPI)
  */
 struct vgic_bitmap {
 	union {
@@ -35,9 +35,9 @@ struct vgic_bitmap {
 		unsigned long reg_ul[0];
 	} percpu[VGIC_MAX_CPUS];
 	union {
-		u32 reg[VGIC_NR_GLOBAL_IRQS / 32];
+		u32 reg[VGIC_NR_SHARED_IRQS / 32];
 		unsigned long reg_ul[0];
-	} global;
+	} shared;
 };
 
 static inline u32 *vgic_bitmap_get_reg(struct vgic_bitmap *x,
@@ -48,7 +48,7 @@ static inline u32 *vgic_bitmap_get_reg(struct vgic_bitmap *x,
 	if (!offset)
 		return x->percpu[cpuid].reg;
 	else
-		return x->global.reg + offset - 1;
+		return x->shared.reg + offset - 1;
 }
 
 static inline int vgic_bitmap_get_irq_val(struct vgic_bitmap *x,
@@ -82,15 +82,20 @@ static inline unsigned long *vgic_bitmap_get_cpu_map(struct vgic_bitmap *x,
 	return x->percpu[cpuid].reg_ul;
 }
 
+static inline unsigned long *vgic_bitmap_get_shared_map(struct vgic_bitmap *x)
+{
+	return x->shared.reg_ul;
+}
+
 struct vgic_bytemap {
 	union {
 		u32 reg[8];
 		unsigned long reg_ul[0];
 	} percpu[VGIC_MAX_CPUS];
 	union {
-		u32 reg[VGIC_NR_GLOBAL_IRQS  / 4];
+		u32 reg[VGIC_NR_SHARED_IRQS  / 4];
 		unsigned long reg_ul[0];
-	} global;
+	} shared;
 };
 
 static inline u32 *vgic_bytemap_get_reg(struct vgic_bytemap *x,
@@ -101,7 +106,7 @@ static inline u32 *vgic_bytemap_get_reg(struct vgic_bytemap *x,
 	if (offset < 4)
 		return x->percpu[cpuid].reg + offset;
 	else
-		return x->global.reg + offset - 4;
+		return x->shared.reg + offset - 4;
 }
 
 static inline int vgic_bytemap_get_irq_val(struct vgic_bytemap *x,
