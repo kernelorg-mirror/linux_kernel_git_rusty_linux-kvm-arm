@@ -721,27 +721,29 @@ static void kvm_vgic_kick_vcpus(struct kvm *kvm)
 	}
 }
 
-void kvm_vgic_inject_irq(struct kvm *kvm, int cpuid, unsigned int irq)
+int kvm_vgic_inject_irq(struct kvm *kvm, int cpuid, const struct kvm_irq_level *irq)
 {
 	int nrcpus = atomic_read(&kvm->online_vcpus);
 
-	if (!irqchip_in_kernel(kvm))
-		return;
-
 	if (WARN_ON(cpuid >= nrcpus))
-		return;
+		return -EINVAL;
 
 	/* Only PPIs or SPIs */
-	if (WARN_ON(irq >= VGIC_NR_IRQS || irq < 16))
-		return;
+	if (WARN_ON(irq->irq >= VGIC_NR_IRQS || irq->irq < 16))
+		return -EINVAL;
 
-	pr_debug("Inject IRQ%d\n", irq);
+	if (!irq->level)
+		return 0;
+
+	pr_debug("Inject IRQ%d\n", irq->irq);
 	spin_lock(&kvm->arch.vgic.lock);
-	vgic_bitmap_set_irq_val(&kvm->arch.vgic.irq_pending, cpuid, irq, 1);
+	vgic_bitmap_set_irq_val(&kvm->arch.vgic.irq_pending, cpuid, irq->irq, 1);
 	vgic_update_state(kvm);
 	spin_unlock(&kvm->arch.vgic.lock);
 
 	kvm_vgic_kick_vcpus(kvm);
+
+	return 0;
 }
 
 static irqreturn_t kvm_vgic_maintainance_handler(int irq, void *data)

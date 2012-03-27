@@ -596,13 +596,18 @@ long kvm_arch_vcpu_ioctl(struct file *filp,
 
 	switch (ioctl) {
 #ifdef CONFIG_KVM_ARM_VGIC
-	case KVM_INTERRUPT: {
-		struct kvm_interrupt irq;
+	case KVM_IRQ_LINE: {
+		struct kvm_irq_level irq_event;
 
-		if (copy_from_user(&irq, argp, sizeof(irq)))
+		if (copy_from_user(&irq_event, argp, sizeof irq_event))
 			return -EFAULT;
-		kvm_vgic_inject_irq(vcpu->kvm, vcpu->vcpu_id, irq.irq);
-		return 0;
+
+		if (!irqchip_in_kernel(vcpu->kvm))
+			return -EINVAL;
+
+		if (irq_event.irq < 16 || irq_event.irq >= 32)
+			return -EINVAL;
+		return kvm_vgic_inject_irq(vcpu->kvm, vcpu->vcpu_id, &irq_event);
 	}
 #endif
 	default:
@@ -625,22 +630,21 @@ long kvm_arch_vm_ioctl(struct file *filp,
 #ifdef CONFIG_KVM_ARM_VGIC
 	case KVM_CREATE_IRQCHIP:
 		return kvm_vgic_init(kvm);
-	case KVM_INTERRUPT: {
-		struct kvm_interrupt irq;
-
-		if (copy_from_user(&irq, argp, sizeof(irq)))
-			return -EFAULT;
-		if (irq.irq <= 32)
-			return -EINVAL;
-		kvm_vgic_inject_irq(kvm, 0, irq.irq);
-		return 0;
-	}
 #endif
 	case KVM_IRQ_LINE: {
 		struct kvm_irq_level irq_event;
 
 		if (copy_from_user(&irq_event, argp, sizeof irq_event))
 			return -EFAULT;
+
+#ifdef CONFIG_KVM_ARM_VGIC
+		if (irqchip_in_kernel(kvm)) {
+			if (irq_event.irq < 32)
+				return -EINVAL;
+			return kvm_vgic_inject_irq(kvm, 0, &irq_event);
+		}
+#endif
+
 		return kvm_arch_vm_ioctl_irq_line(kvm, &irq_event);
 	}
 	default:
