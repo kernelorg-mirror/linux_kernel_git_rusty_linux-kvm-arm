@@ -776,7 +776,8 @@ static int init_hyp_mode(void)
 	/*
 	 * Init HYP view of VGIC
 	 */
-	if (kvm_vgic_hyp_init())
+	err = kvm_vgic_hyp_init();
+	if (err)
 		goto out_free_mappings;
 
 	/*
