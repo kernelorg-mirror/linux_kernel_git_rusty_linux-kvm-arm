@@ -7,77 +7,121 @@
 #include <linux/spinlock.h>
 #include <linux/types.h>
 
-#define VGIC_NR_IRQS	128 /* Arbitrary number, must be a power of 2! */
-#define VGIC_MAX_CPUS	KVM_MAX_VCPUS /* Same as the HW GIC */
+#define VGIC_NR_IRQS		128
+#define VGIC_NR_GLOBAL_IRQS	(VGIC_NR_IRQS - 32)
+#define VGIC_MAX_CPUS		KVM_MAX_VCPUS
 
+/* Sanity checks... */
 #if (VGIC_MAX_CPUS > 8)
 #error	Invalid number of CPU interfaces
 #endif
 
+#if (VGIC_NR_IRQS & 31)
+#error "VGIC_NR_IRQS must be a multiple of 32"
+#endif
+
+#if (VGIC_NR_IRQS > 1024)
+#error "VGIC_NR_IRQS must be <= 1024"
+#endif
+
 /*
- * The GIC registers describing interrupts have two parts:
+ * The GIC distributor registers describing interrupts have two parts:
  * - 32 per-CPU interrupts (SGI + PPI)
  * - a bunch of global interrups (SPI)
- * They can have 1, 2 or 8 bit fields. Make it easier by having some template
- * to create the structures and the accessors.
  */
-#define DEFINE_VGIC_MAP_STRUCT(typename, size)				  \
-struct typename {						  	  \
-	union {								  \
-		u32 reg[32 / (sizeof(u32) * 8 / size)];			  \
-		unsigned long reg_ul[0];				  \
-	} percpu[VGIC_MAX_CPUS];					  \
-	union {								  \
-		u32 reg[(VGIC_NR_IRQS - 32) / (sizeof(u32) * 8 / size)];  \
-		unsigned long reg_ul[0];				  \
-	} global;							  \
-};								  	  \
-static inline u32 *typename##_get_reg(struct typename *x,		  \
-				      int cpuid, u32 offset)		  \
-{									  \
-	static const int irq_per_u32 = sizeof(u32) * 8 / size;		  \
-	static const int glob_offset = 32 / irq_per_u32;		  \
-	offset >>= 2;							  \
-	BUG_ON(offset > (VGIC_NR_IRQS  / irq_per_u32));			  \
-	if (offset < glob_offset)					  \
-		return x->percpu[cpuid].reg + offset;			  \
-	else								  \
-		return x->global.reg + offset - glob_offset;		  \
-}									  \
-static inline int typename##_get_irq_val(struct typename *x,		  \
-					 int cpuid, int irq)		  \
-{									  \
-	static const int irq_per_u32 = sizeof(u32) * 8 / size;		  \
-	static const u32 mask = (1 << size) - 1;			  \
-	u32 *reg, offset, shift;					  \
-	offset = (irq / irq_per_u32) << 2;				  \
-	shift = (irq % irq_per_u32) * size;				  \
-	reg = typename##_get_reg(x, cpuid, offset);			  \
-	return (*reg >> shift) & mask;					  \
-}									  \
-static inline void typename##_set_irq_val(struct typename *x,		  \
-					 int cpuid, int irq, int val)	  \
-{									  \
-	static const int irq_per_u32 = sizeof(u32) * 8 / size;		  \
-	static const u32 mask = (1 << size) - 1;			  \
-	u32 *reg, offset, shift;					  \
-	offset = (irq / irq_per_u32) << 2;				  \
-	shift = (irq % irq_per_u32) * size;				  \
-	reg = typename##_get_reg(x, cpuid, offset);			  \
-	*reg &= ~(mask << shift);					  \
-	*reg |= (val & mask) << shift;					  \
-}									  \
-static inline unsigned long *typename##_get_cpu_map(struct typename *x,	  \
-						    int cpu_id)		  \
-{									  \
-	if (unlikely(cpu_id >= VGIC_MAX_CPUS))				  \
-		return NULL;						  \
-	return x->percpu[cpu_id].reg_ul;				  \
+struct vgic_bitmap {
+	union {
+		u32 reg[1];
+		unsigned long reg_ul[0];
+	} percpu[VGIC_MAX_CPUS];
+	union {
+		u32 reg[VGIC_NR_GLOBAL_IRQS / 32];
+		unsigned long reg_ul[0];
+	} global;
+};
+
+static inline u32 *vgic_bitmap_get_reg(struct vgic_bitmap *x,
+				       int cpuid, u32 offset)
+{
+	offset >>= 2;
+	BUG_ON(offset > (VGIC_NR_IRQS / 32));
+	if (!offset)
+		return x->percpu[cpuid].reg;
+	else
+		return x->global.reg + offset - 1;
 }
 
+static inline int vgic_bitmap_get_irq_val(struct vgic_bitmap *x,
+					 int cpuid, int irq)
+{
+	u32 *reg, offset, shift;
 
-DEFINE_VGIC_MAP_STRUCT(vgic_bitmap, 1);
-DEFINE_VGIC_MAP_STRUCT(vgic_bytemap, 8);
+	offset = (irq / 32) << 2;
+	shift = irq & 31;
+	reg = vgic_bitmap_get_reg(x, cpuid, offset);
+	return !!(*reg & (1 << shift));
+}
+
+static inline void vgic_bitmap_set_irq_val(struct vgic_bitmap *x,
+					   int cpuid, int irq, int val)
+{
+	u32 *reg, offset, shift;
+
+	offset = (irq / 32) << 2;
+	shift = irq & 31;
+	reg = vgic_bitmap_get_reg(x, cpuid, offset);
+	*reg &= ~(1 << shift);
+	*reg |= (!!val) << shift;
+}
+
+static inline unsigned long *vgic_bitmap_get_cpu_map(struct vgic_bitmap *x,
+						     int cpuid)
+{
+	if (unlikely(cpuid >= VGIC_MAX_CPUS))
+		return NULL;
+	return x->percpu[cpuid].reg_ul;
+}
+
+struct vgic_bytemap {
+	union {
+		u32 reg[8];
+		unsigned long reg_ul[0];
+	} percpu[VGIC_MAX_CPUS];
+	union {
+		u32 reg[VGIC_NR_GLOBAL_IRQS  / 4];
+		unsigned long reg_ul[0];
+	} global;
+};
+
+static inline u32 *vgic_bytemap_get_reg(struct vgic_bytemap *x,
+					int cpuid, u32 offset)
+{
+	offset >>= 2;
+	BUG_ON(offset > (VGIC_NR_IRQS / 4));
+	if (offset < 4)
+		return x->percpu[cpuid].reg + offset;
+	else
+		return x->global.reg + offset - 4;
+}
+
+static inline int vgic_bytemap_get_irq_val(struct vgic_bytemap *x,
+					   int cpuid, int irq)
+{
+	u32 *reg, shift;
+	shift = (irq & 3) * 8;
+	reg = vgic_bytemap_get_reg(x, cpuid, irq);
+	return (*reg >> shift) & 0xff;
+}
+
+static inline void vgic_bytemap_set_irq_val(struct vgic_bytemap *x,
+					    int cpuid, int irq, int val)
+{
+	u32 *reg, shift;
+	shift = (irq & 3) * 8;
+	reg = vgic_bytemap_get_reg(x, cpuid, irq);
+	*reg &= ~(0xff << shift);
+	*reg |= (val & 0xff) << shift;
+}
 
 struct vgic_dist {
 #ifdef CONFIG_KVM_ARM_VGIC
