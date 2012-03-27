@@ -590,7 +590,6 @@ static int io_mem_abort(struct kvm_vcpu *vcpu, struct kvm_run *run,
 	instr_len = ((vcpu->arch.hsr >> 25) & 1) ? 4 : 2;
 
 	/* Export MMIO operations to user space */
-	run->exit_reason = KVM_EXIT_MMIO;
 	run->mmio.is_write = is_write;
 	run->mmio.phys_addr = fault_ipa;
 	run->mmio.len = len;
@@ -603,6 +602,8 @@ static int io_mem_abort(struct kvm_vcpu *vcpu, struct kvm_run *run,
 
 	if (is_write)
 		memcpy(run->mmio.data, vcpu_reg(vcpu, rd), len);
+
+	run->exit_reason = vgic_handle_mmio(vcpu, run);
 
 	/*
 	 * The MMIO instruction is emulated and should not be re-executed
