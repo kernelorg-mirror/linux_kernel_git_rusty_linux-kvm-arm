@@ -20,6 +20,15 @@
 #include <linux/kvm_host.h>
 #include <asm/kvm_asm.h>
 
+/*
+ * The in-kernel MMIO emulation code wants to use a copy of run->mmio,
+ * which is an anonymous type. In order to avoid keeping the two types
+ * in sync, use the below horror. Yes, this is beyond ugly.
+ */
+struct kvm_exit_mmio {
+	typeof(((struct kvm_run *)0)->mmio)	mmio;
+};
+
 u32 *vcpu_reg_mode(struct kvm_vcpu *vcpu, u8 reg_num, enum vcpu_mode mode);
 
 static inline enum vcpu_mode vcpu_mode(struct kvm_vcpu *vcpu)
