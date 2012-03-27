@@ -142,7 +142,6 @@ struct vgic_dist {
 	struct vgic_bitmap	irq_pending;
 
 	struct vgic_bytemap	irq_priority;/* Not used yet. Useful? */
-	struct vgic_bytemap	irq_target;
 
 	struct vgic_bitmap	irq_cfg;
 

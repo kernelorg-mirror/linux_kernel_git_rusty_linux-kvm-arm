@@ -22,7 +22,25 @@
 #include <linux/io.h>
 #include <asm/kvm_emulate.h>
 
-/* Temporary hacks, need to probe DT instead */
+/*
+ * How the whole thing works (courtesy of Christoffer Dall):
+ *
+ * - at any time, the dist->irq_pending_on_cpu is the oracle that knows if
+ *   something is pending
+ * - vgic pending interrupts are stored on the vgic.irq_pending vgic
+ *   bitmap (this bitmap is updated by both user land ioctls and guest
+ *   mmio ops)
+ * - every time the bitmap changes, the irq_pending_on_cpu oracle is
+ *   recalculated
+ * - to calculate the oracle, we need info for each cpu from
+ *   compute_pending_for_cpu, which considers:
+ *   - PPI: dist->irq_pending & dist->irq_enable
+ *   - SPI: dist->irq_pending & dist->irq_enable & dist->irq_spi_target
+ *   - irq_spi_target is in essence a differently 'formatted' copy of
+ *     irq_target, stored for each vcpu
+ */
+
+/* Temporary hacks, need to be provided by userspace emulation */
 #define VGIC_DIST_BASE		0x2c001000
 #define VGIC_DIST_SIZE		0x1000
 
@@ -184,23 +202,58 @@ static void handle_mmio_priority_reg(struct kvm_vcpu *vcpu,
 			ACCESS_READ_VALUE | ACCESS_WRITE_VALUE);
 }
 
-static void update_spi_target(struct kvm *kvm)
+static u32 vgic_get_target_reg(struct kvm *kvm, int irq)
 {
 	struct vgic_dist *dist = &kvm->arch.vgic;
-	int c, i, nrcpus = atomic_read(&kvm->online_vcpus);
-	u8 targ;
+	int i, c, nrcpus = atomic_read(&kvm->online_vcpus);
 	unsigned long *bmap;
+	u32 val = 0;
 
-	for (i = 32; i < VGIC_NR_IRQS; i++) {
-		targ = vgic_bytemap_get_irq_val(&dist->irq_target, 0, i);
+	BUG_ON(irq & 3);
+	BUG_ON(irq < 32);
 
-		for (c = 0; c < nrcpus; c++) {
-			bmap = dist->irq_spi_target[c].global.reg_ul;
+	irq -= 32;
 
-			if (targ & (1 << c))
-				set_bit(i - 32, bmap);
+	for (c = 0; c < nrcpus; c++) {
+		bmap = dist->irq_spi_target[c].global.reg_ul;
+		for (i = 0; i < 4; i++)
+			if (test_bit(irq + i, bmap))
+				val |= 1 << (c + i * 8);
+	}
+
+	return val;
+}
+
+static void vgic_set_target_reg(struct kvm *kvm, u32 val, int irq)
+{
+	struct vgic_dist *dist = &kvm->arch.vgic;
+	int i, c, nrcpus = atomic_read(&kvm->online_vcpus);
+	unsigned long *bmap;
+	u32 target;
+
+	BUG_ON(irq & 3);
+	BUG_ON(irq < 32);
+
+	irq -= 32;
+
+	/*
+	 * Pick the LSB in each byte. This ensure we only target one
+	 * single vcpu per IRQ. If the byte is null, assume we target
+	 * CPU0.
+	 */
+	for (i = 0; i < 32; i += 8) {
+		target = ffs(val & (0xffU << i));
+		val &= ~(0xffU << i);
+		val |= 1 << (target ? (target - 1) : i);
+	}
+
+	for (c = 0; c < nrcpus; c++) {
+		bmap = dist->irq_spi_target[c].global.reg_ul;
+		for (i = 0; i < 4; i++) {
+			if (val & (1 << (c + i * 8)))
+				set_bit(irq + i, bmap);
 			else
-				clear_bit(i - 32, bmap);
+				clear_bit(irq + i, bmap);
 		}
 	}
 }
@@ -208,7 +261,7 @@ static void update_spi_target(struct kvm *kvm)
 static void handle_mmio_target_reg(struct kvm_vcpu *vcpu,
 				   struct kvm_exit_mmio *mmio, u32 offset)
 {
-	u32 *reg;
+	u32 reg;
 
 	/* We treat the banked interrupts targets as read-only */
 	if (offset < 32) {
@@ -221,12 +274,11 @@ static void handle_mmio_target_reg(struct kvm_vcpu *vcpu,
 		return;
 	}
 
-	reg = vgic_bytemap_get_reg(&vcpu->kvm->arch.vgic.irq_target,
-				   vcpu->vcpu_id, offset);
-	vgic_reg_access(mmio, reg, offset,
+	reg = vgic_get_target_reg(vcpu->kvm, offset & ~3U);
+	vgic_reg_access(mmio, &reg, offset,
 			ACCESS_READ_VALUE | ACCESS_WRITE_VALUE);
 	if (mmio->mmio.is_write) {
-		update_spi_target(vcpu->kvm);
+		vgic_set_target_reg(vcpu->kvm, reg, offset & ~3U);
 		vgic_update_state(vcpu->kvm);
 	}
 }
