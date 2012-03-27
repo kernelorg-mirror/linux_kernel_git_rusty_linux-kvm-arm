@@ -162,6 +162,7 @@ struct vgic_cpu {
 #ifdef CONFIG_KVM_ARM_VGIC
 	u8		vgic_irq_lr_map[VGIC_NR_IRQS];	/* per IRQ to LR mapping */
 	DECLARE_BITMAP(	pending, VGIC_NR_IRQS);
+	DECLARE_BITMAP(	lr_used, 64);
 
 	int		nr_lr;
 
