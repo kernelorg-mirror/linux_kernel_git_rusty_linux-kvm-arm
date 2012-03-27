@@ -27,15 +27,15 @@
  *
  * - at any time, the dist->irq_pending_on_cpu is the oracle that knows if
  *   something is pending
- * - vgic pending interrupts are stored on the vgic.irq_pending vgic
+ * - vgic pending interrupts are stored on the vgic.irq_state vgic
  *   bitmap (this bitmap is updated by both user land ioctls and guest
  *   mmio ops)
  * - every time the bitmap changes, the irq_pending_on_cpu oracle is
  *   recalculated
  * - to calculate the oracle, we need info for each cpu from
  *   compute_pending_for_cpu, which considers:
- *   - PPI: dist->irq_pending & dist->irq_enable
- *   - SPI: dist->irq_pending & dist->irq_enable & dist->irq_spi_target
+ *   - PPI: dist->irq_state & dist->irq_enable
+ *   - SPI: dist->irq_state & dist->irq_enable & dist->irq_spi_target
  *   - irq_spi_target is in essence a differently 'formatted' copy of
  *     irq_target, stored for each vcpu
  */
@@ -537,15 +537,15 @@ static int compute_pending_for_cpu(struct kvm_vcpu *vcpu)
 	vcpu_id = vcpu->vcpu_id;
 	pend = vcpu->arch.vgic_cpu.pending;
 
-	pending = vgic_bitmap_get_cpu_map(&dist->irq_pending, vcpu_id);
+	pending = vgic_bitmap_get_cpu_map(&dist->irq_state, vcpu_id);
 	enabled = vgic_bitmap_get_cpu_map(&dist->irq_enabled, vcpu_id);
 	bitmap_and(pend, pending, enabled, 32);
 	
-	pending = vgic_bitmap_get_shared_map(&dist->irq_pending);
+	pending = vgic_bitmap_get_shared_map(&dist->irq_state);
 	enabled = vgic_bitmap_get_shared_map(&dist->irq_enabled);
 	bitmap_and(pend + 1, pending, enabled, VGIC_NR_SHARED_IRQS);
 	bitmap_and(pend + 1, pend + 1,
-		   vgic_bitmap_get_shared_map(&dist->irq_spi_target[vcpu_id],
+		   vgic_bitmap_get_shared_map(&dist->irq_spi_target[vcpu_id]),
 		   VGIC_NR_SHARED_IRQS);
 
 	return (find_first_bit(pend, VGIC_NR_IRQS) < VGIC_NR_IRQS);
@@ -581,7 +581,8 @@ static void vgic_update_state(struct kvm *kvm)
 static int vgic_queue_irq(struct kvm_vcpu *vcpu, u8 sgi_source_id, int irq)
 {
 	struct vgic_cpu *vgic_cpu = &vcpu->arch.vgic_cpu;
-	int lr;
+	struct vgic_dist *dist = &vcpu->kvm->arch.vgic;
+	int lr, is_level;
 
 	/* Sanitize the input... */
 	BUG_ON(sgi_source_id & ~7);
@@ -591,25 +592,33 @@ static int vgic_queue_irq(struct kvm_vcpu *vcpu, u8 sgi_source_id, int irq)
 	kvm_debug("Queue IRQ%d\n", irq);
 
 	lr = vgic_cpu->vgic_irq_lr_map[irq];
+	is_level = !vgic_irq_is_edge(dist, irq);
 
 	/* Do we have an active interrupt for the same CPUID? */
 	if (lr != LR_EMPTY &&
 	    (vgic_cpu->vgic_lr[lr] & VGIC_LR_PHYSID_CPUID) == (sgi_source_id << 10)) {
-		kvm_debug("LR%d piggyback for IRQ%d %x\n", lr, irq, sgi_source_id);
+		kvm_debug("LR%d piggyback for IRQ%d %x\n", lr, irq, vgic_cpu->vgic_lr[lr]);
+		BUG_ON(!test_bit(lr, vgic_cpu->lr_used));
 		vgic_cpu->vgic_lr[lr] |= VGIC_LR_PENDING_BIT;
+		if (is_level)
+			vgic_cpu->vgic_lr[lr] |= VGIC_LR_EOI;
 		return 0;
 	}
 
 	/* Try to use another LR for this interrupt */
-	lr = find_first_bit((unsigned long *)vgic_cpu->vgic_elsr,
+	lr = find_first_bit((unsigned long *)vgic_cpu->vgic_elrsr,
 			       vgic_cpu->nr_lr);
 	if (lr >= vgic_cpu->nr_lr)
 		return 1;
 
 	kvm_debug("LR%d allocated for IRQ%d %x\n", lr, irq, sgi_source_id);
 	vgic_cpu->vgic_lr[lr] = (VGIC_LR_PENDING_BIT |  (sgi_source_id << 10) | irq);
+	if (is_level)
+		vgic_cpu->vgic_lr[lr] |= VGIC_LR_EOI;
+
 	vgic_cpu->vgic_irq_lr_map[irq] = lr;
-	clear_bit(lr, (unsigned long *)vgic_cpu->vgic_elsr);
+	clear_bit(lr, (unsigned long *)vgic_cpu->vgic_elrsr);
+	set_bit(lr, vgic_cpu->lr_used);
 
 	return 0;
 }
@@ -639,7 +648,7 @@ static void __kvm_vgic_sync_to_cpu(struct kvm_vcpu *vcpu)
 	}
 
 	/* SGIs */
-	pending = vgic_bitmap_get_cpu_map(&dist->irq_pending, vcpu_id);
+	pending = vgic_bitmap_get_cpu_map(&dist->irq_state, vcpu_id);
 	for_each_set_bit(i, vgic_cpu->pending, 16) {
 		unsigned long sources;
 
@@ -672,14 +681,21 @@ static void __kvm_vgic_sync_to_cpu(struct kvm_vcpu *vcpu)
 
 	
 	/* SPIs */
-	pending = vgic_bitmap_get_shared_map(&dist->irq_pending);
+	pending = vgic_bitmap_get_shared_map(&dist->irq_state);
 	for_each_set_bit_from(i, vgic_cpu->pending, VGIC_NR_IRQS) {
+		if (vgic_bitmap_get_irq_val(&dist->irq_active, 0, i))
+			continue; /* level interrupt, already queued */
+
 		if (vgic_queue_irq(vcpu, 0, i)) {
 			overflow = 1;
 			continue;
 		}
 
-		clear_bit(i - 32, pending);
+		/* Immediate clear on edge, set active on level */
+		if (vgic_irq_is_edge(dist, i))
+			clear_bit(i - 32, pending);
+		else
+			vgic_bitmap_set_irq_val(&dist->irq_active, 0, i, 1);
 	}
 
 epilog:
@@ -704,20 +720,24 @@ static void __kvm_vgic_sync_from_cpu(struct kvm_vcpu *vcpu)
 {
 	struct vgic_cpu *vgic_cpu = &vcpu->arch.vgic_cpu;
 	struct vgic_dist *dist = &vcpu->kvm->arch.vgic;
-	int empty, pending;
+	int lr, pending;
 
 	/* Clear mappings for empty LRs */
-	for_each_set_bit(empty, (unsigned long *)vgic_cpu->vgic_elsr,
+	for_each_set_bit(lr, (unsigned long *)vgic_cpu->vgic_elrsr,
 			 vgic_cpu->nr_lr) {
-		int lr = empty;
-		int irq = vgic_cpu->vgic_lr[lr] & VGIC_LR_VIRTUALID;
+		int irq;
+
+		if (!test_and_clear_bit(lr, vgic_cpu->lr_used))
+			continue;
+
+		irq = vgic_cpu->vgic_lr[lr] & VGIC_LR_VIRTUALID;
 
 		BUG_ON(irq >= VGIC_NR_IRQS);
 		vgic_cpu->vgic_irq_lr_map[irq] = LR_EMPTY;
 	}
 
 	/* Check if we still have something up our sleeve... */
-	pending = find_first_zero_bit((unsigned long *)vgic_cpu->vgic_elsr,
+	pending = find_first_zero_bit((unsigned long *)vgic_cpu->vgic_elrsr,
 				      vgic_cpu->nr_lr);
 	if (pending < vgic_cpu->nr_lr)
 		set_bit(1 << vcpu->vcpu_id, &dist->irq_pending_on_cpu);

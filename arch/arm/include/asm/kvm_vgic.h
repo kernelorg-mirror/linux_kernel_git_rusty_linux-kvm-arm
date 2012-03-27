@@ -170,7 +170,8 @@ struct vgic_cpu {
 	u32		vgic_hcr;
 	u32		vgic_vmcr;
 	u32		vgic_misr;	/* Saved only */
-	u32		vgic_elsr[2];	/* Saved only */
+	u32		vgic_eisr[2];	/* Saved only */
+	u32		vgic_elrsr[2];	/* Saved only */
 	u32		vgic_apr;
 	u32		vgic_lr[64];	/* Silly, A15 has only 4... */
 #endif
@@ -184,6 +185,10 @@ struct vgic_cpu {
 #define VGIC_LR_STATE		(3 << 28)
 #define VGIC_LR_PENDING_BIT	(1 << 28)
 #define VGIC_LR_ACTIVE_BIT	(1 << 29)
+#define VGIC_LR_EOI		(1 << 19)
+
+#define VGIC_MISR_EOI		(1 << 0)
+#define VGIC_MISR_U		(1 << 1)
 
 #define LR_EMPTY	0xff
 
