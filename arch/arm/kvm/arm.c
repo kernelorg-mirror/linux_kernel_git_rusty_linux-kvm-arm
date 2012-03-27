@@ -614,6 +614,8 @@ long kvm_arch_vm_ioctl(struct file *filp,
 
 	switch (ioctl) {
 #ifdef CONFIG_KVM_ARM_VGIC
+	case KVM_CREATE_IRQCHIP:
+		return kvm_vgic_init(kvm);
 	case KVM_INTERRUPT: {
 		struct kvm_interrupt irq;
 
