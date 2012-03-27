@@ -618,6 +618,10 @@ long kvm_arch_vm_ioctl(struct file *filp,
 	void __user *argp = (void __user *)arg;
 
 	switch (ioctl) {
+#ifdef CONFIG_KVM_ARM_VGIC
+	case KVM_CREATE_IRQCHIP:
+		return kvm_vgic_init(kvm);
+#endif
 	case KVM_IRQ_LINE: {
 		struct kvm_irq_level irq_event;
 
