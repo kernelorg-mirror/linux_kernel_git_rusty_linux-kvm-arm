@@ -277,20 +277,20 @@ ENDPROC(__kvm_flush_vm_context)
 	ldr	r3, [r2, #GICH_HCR]
 	ldr	r4, [r2, #GICH_VMCR]
 	ldr	r5, [r2, #GICH_MISR]
-	ldr	r6, [r2, #GICH_ELSR0]
-	ldr	r7, [r2, #GICH_ELSR1]
-	ldr	r8, [r2, #GICH_APR]
+	ldr	r6, [r2, #GICH_EISR0]
+	ldr	r7, [r2, #GICH_EISR1]
+	ldr	r8, [r2, #GICH_ELRSR0]
+	ldr	r9, [r2, #GICH_ELRSR1]
+	ldr	r10, [r2, #GICH_APR]
 
 	str	r3, [\vcpup, #VCPU_VGIC_HCR]
 	str	r4, [\vcpup, #VCPU_VGIC_VMCR]
 	str	r5, [\vcpup, #VCPU_VGIC_MISR]
-	str	r6, [\vcpup, #VCPU_VGIC_ELSR]
-	str	r7, [\vcpup, #(VCPU_VGIC_ELSR + 4)]
-	str	r8, [\vcpup, #VCPU_VGIC_APR]
-
-	/* Set HCR back to 0 in order to avoid spurious interrupts */
-	mov	r3, #0
-	str	r3, [r2, #GICH_HCR]
+	str	r6, [\vcpup, #VCPU_VGIC_EISR]
+	str	r7, [\vcpup, #(VCPU_VGIC_EISR + 4)]
+	str	r8, [\vcpup, #VCPU_VGIC_ELRSR]
+	str	r9, [\vcpup, #(VCPU_VGIC_ELRSR + 4)]
+	str	r10, [\vcpup, #VCPU_VGIC_APR]
 
 	/* Save list registers */
 	add	r2, r2, #GICH_LR0

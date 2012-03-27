@@ -146,8 +146,10 @@
 #define GICH_VTR	0x4
 #define GICH_VMCR	0x8
 #define GICH_MISR	0x10
-#define GICH_ELSR0 	0x30
-#define GICH_ELSR1 	0x34
+#define GICH_EISR0 	0x20
+#define GICH_EISR1 	0x24
+#define GICH_ELRSR0 	0x30
+#define GICH_ELRSR1 	0x34
 #define GICH_APR	0xf0
 #define GICH_LR0	0x100
 

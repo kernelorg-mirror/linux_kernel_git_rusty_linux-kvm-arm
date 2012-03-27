@@ -187,7 +187,8 @@ int main(void)
   DEFINE(VCPU_VGIC_HCR,		offsetof(struct kvm_vcpu, arch.vgic_cpu.vgic_hcr));
   DEFINE(VCPU_VGIC_VMCR,	offsetof(struct kvm_vcpu, arch.vgic_cpu.vgic_vmcr));
   DEFINE(VCPU_VGIC_MISR,	offsetof(struct kvm_vcpu, arch.vgic_cpu.vgic_misr));
-  DEFINE(VCPU_VGIC_ELSR,	offsetof(struct kvm_vcpu, arch.vgic_cpu.vgic_elsr));
+  DEFINE(VCPU_VGIC_EISR,	offsetof(struct kvm_vcpu, arch.vgic_cpu.vgic_eisr));
+  DEFINE(VCPU_VGIC_ELRSR,	offsetof(struct kvm_vcpu, arch.vgic_cpu.vgic_elrsr));
   DEFINE(VCPU_VGIC_APR,		offsetof(struct kvm_vcpu, arch.vgic_cpu.vgic_apr));
   DEFINE(VCPU_VGIC_LR,		offsetof(struct kvm_vcpu, arch.vgic_cpu.vgic_lr));
   DEFINE(VCPU_VGIC_NR_LR,	offsetof(struct kvm_vcpu, arch.vgic_cpu.nr_lr));
