@@ -56,6 +56,11 @@
 static void vgic_update_state(struct kvm *kvm);
 static void vgic_dispatch_sgi(struct kvm_vcpu *vcpu, u32 reg);
 
+static inline int vgic_irq_is_edge(struct vgic_dist *dist, int irq)
+{
+	return vgic_bitmap_get_irq_val(&dist->irq_cfg, 0, irq);
+}
+
 static void vgic_reg_access(struct kvm_exit_mmio *mmio, u32 *reg, u32 offset, int mode)
 {
 	int word_offset = offset & 3;
@@ -174,7 +179,7 @@ static void handle_mmio_clear_enable_reg(struct kvm_vcpu *vcpu,
 static void handle_mmio_set_pending_reg(struct kvm_vcpu *vcpu,
 					struct kvm_exit_mmio *mmio, u32 offset)
 {
-	u32 *reg = vgic_bitmap_get_reg(&vcpu->kvm->arch.vgic.irq_pending,
+	u32 *reg = vgic_bitmap_get_reg(&vcpu->kvm->arch.vgic.irq_state,
 				       vcpu->vcpu_id, offset);
 	vgic_reg_access(mmio, reg, offset,
 			ACCESS_READ_VALUE | ACCESS_WRITE_SETBIT);
@@ -185,7 +190,7 @@ static void handle_mmio_set_pending_reg(struct kvm_vcpu *vcpu,
 static void handle_mmio_clear_pending_reg(struct kvm_vcpu *vcpu,
 					  struct kvm_exit_mmio *mmio, u32 offset)
 {
-	u32 *reg = vgic_bitmap_get_reg(&vcpu->kvm->arch.vgic.irq_pending,
+	u32 *reg = vgic_bitmap_get_reg(&vcpu->kvm->arch.vgic.irq_state,
 				       vcpu->vcpu_id, offset);
 	vgic_reg_access(mmio, reg, offset,
 			ACCESS_READ_VALUE | ACCESS_WRITE_CLEARBIT);
@@ -205,7 +210,8 @@ static void handle_mmio_priority_reg(struct kvm_vcpu *vcpu,
 static u32 vgic_get_target_reg(struct kvm *kvm, int irq)
 {
 	struct vgic_dist *dist = &kvm->arch.vgic;
-	int i, c, nrcpus = atomic_read(&kvm->online_vcpus);
+	struct kvm_vcpu *vcpu;
+	int i, c;
 	unsigned long *bmap;
 	u32 val = 0;
 
@@ -214,7 +220,7 @@ static u32 vgic_get_target_reg(struct kvm *kvm, int irq)
 
 	irq -= 32;
 
-	for (c = 0; c < nrcpus; c++) {
+	kvm_for_each_vcpu(c, vcpu, kvm) {	
 		bmap = vgic_bitmap_get_shared_map(&dist->irq_spi_target[c]);
 		for (i = 0; i < 4; i++)
 			if (test_bit(irq + i, bmap))
@@ -227,7 +233,8 @@ static u32 vgic_get_target_reg(struct kvm *kvm, int irq)
 static void vgic_set_target_reg(struct kvm *kvm, u32 val, int irq)
 {
 	struct vgic_dist *dist = &kvm->arch.vgic;
-	int i, c, nrcpus = atomic_read(&kvm->online_vcpus);
+	struct kvm_vcpu *vcpu;
+	int i, c;
 	unsigned long *bmap;
 	u32 target;
 
@@ -247,7 +254,7 @@ static void vgic_set_target_reg(struct kvm *kvm, u32 val, int irq)
 		val |= 1 << (target ? (target - 1) : i);
 	}
 
-	for (c = 0; c < nrcpus; c++) {
+	kvm_for_each_vcpu(c, vcpu, kvm) {
 		bmap = vgic_bitmap_get_shared_map(&dist->irq_spi_target[c]);
 		for (i = 0; i < 4; i++) {
 			if (val & (1 << (c + i * 8)))
@@ -509,12 +516,12 @@ static void vgic_dispatch_sgi(struct kvm_vcpu *vcpu, u32 reg)
 		break;
 	}
 
-	for (c = 0; c < nrcpus; c++) {
+	kvm_for_each_vcpu(c, vcpu, kvm) {
 		if (target_cpus & 1) {
 			/* Flag the SGI as pending */
-			vgic_bitmap_set_irq_val(&dist->irq_pending, c, sgi, 1);
+			vgic_bitmap_set_irq_val(&dist->irq_state, c, sgi, 1);
 			dist->irq_sgi_sources[c][sgi] |= 1 << vcpu_id;
-			pr_debug("SGI%d from CPU%d to CPU%d\n", sgi, vcpu_id, c);
+			kvm_debug("SGI%d from CPU%d to CPU%d\n", sgi, vcpu_id, c);
 		}
 
 		target_cpus >>= 1;
@@ -533,7 +540,7 @@ static int compute_pending_for_cpu(struct kvm_vcpu *vcpu)
 static void vgic_update_state(struct kvm *kvm)
 {
 	struct vgic_dist *dist = &kvm->arch.vgic;
-	int nrcpus = atomic_read(&kvm->online_vcpus);
+	struct kvm_vcpu *vcpu;
 	int c;
 
 	if (!dist->enabled) {
@@ -541,9 +548,7 @@ static void vgic_update_state(struct kvm *kvm)
 		return;
 	}
 
-	for (c = 0; c < nrcpus; c++) {
-		struct kvm_vcpu *vcpu = kvm_get_vcpu(kvm, c);
-
+	kvm_for_each_vcpu(c, vcpu, kvm) {
 		if (compute_pending_for_cpu(vcpu)) {
 			pr_debug("CPU%d has pending interrupts\n", c);
 			set_bit(1 << c, &dist->irq_pending_on_cpu);

@@ -143,7 +143,8 @@ struct vgic_dist {
 	u32			enabled;
 
 	struct vgic_bitmap	irq_enabled;
-	struct vgic_bitmap	irq_pending;
+	struct vgic_bitmap	irq_state;
+	struct vgic_bitmap	irq_active;
 
 	struct vgic_bytemap	irq_priority;/* Not used yet. Useful? */
 
