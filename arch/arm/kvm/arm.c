@@ -466,8 +466,10 @@ static int handle_exit(struct kvm_vcpu *vcpu, struct kvm_run *run,
 {
 	unsigned long hsr_ec;
 
-	if (exception_index == ARM_EXCEPTION_IRQ)
+	if (exception_index == ARM_EXCEPTION_IRQ) {
+		vcpu->stat.irq_exits++;
 		return 0;
+	}
 
 	if (exception_index != ARM_EXCEPTION_HVC) {
 		kvm_pr_unimpl("Unsupported exception type: %d",
@@ -556,6 +558,7 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu, struct kvm_run *run)
 
 		kvm_arm_set_running_vcpu(NULL);
 		vcpu->mode = OUTSIDE_GUEST_MODE;
+		vcpu->stat.exits++;
 		kvm_guest_exit();
 		local_irq_enable();
 

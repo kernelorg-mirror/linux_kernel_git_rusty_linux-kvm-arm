@@ -626,6 +626,10 @@ static int io_mem_abort(struct kvm_vcpu *vcpu, struct kvm_run *run,
 	switch (run->exit_reason) {
 	case KVM_EXIT_MMIO:
 		run->mmio = mmio.mmio;
+		vcpu->stat.mmio_exits++;
+		break;
+	case KVM_EXIT_UNKNOWN:
+		vcpu->stat.kmmio_exits++;
 		break;
 	}
 
