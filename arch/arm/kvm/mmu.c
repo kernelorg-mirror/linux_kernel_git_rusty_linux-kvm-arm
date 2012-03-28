@@ -604,6 +604,14 @@ static int io_mem_abort(struct kvm_vcpu *vcpu, struct kvm_run *run,
 		memcpy(run->mmio.data, vcpu_reg(vcpu, rd), len);
 
 	run->exit_reason = vgic_handle_mmio(vcpu, run);
+	switch (run->exit_reason) {
+	case KVM_EXIT_MMIO:
+		vcpu->stat.mmio_exits++;
+		break;
+	case KVM_EXIT_UNKNOWN:
+		vcpu->stat.kmmio_exits++;
+		break;
+	}
 
 	/*
 	 * The MMIO instruction is emulated and should not be re-executed
