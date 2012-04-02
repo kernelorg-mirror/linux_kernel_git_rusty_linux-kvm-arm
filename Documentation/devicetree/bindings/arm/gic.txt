@@ -57,3 +57,32 @@ Example:
 		      <0xfff10100 0x100>;
 	};
 
+
+* GIC virtualization extensions (VGIC)
+
+For ARM cores that support the virtualization extensions, an
+additional node describes the VGIC hardware block. Only exists if the
+GIC is the primary interrupt controller.
+
+Required properties:
+- compatible : should be one of:
+	"arm,cortex-a15-vgic"
+	"arm,cortex-a7-vgic"
+	"arm,vgic"
+
+- reg : Specifies base physical address and size of the VGIC
+  registers. The first region is the GIC virtual interface control
+  register base and size.  the 2nd region is the GIC virtual cpu
+  interface register base and size.
+
+- interrupts : VGIC maintainance interrupt. Must be relative to the
+  primary GIC.
+
+Example:
+
+	vgic@2c004000 {
+		compatible = "arm,cortex-a15-vgic", "arm,vgic";
+		reg = <0x2c004000 0x2000>,
+		      <0x2c006000 0x2000>;
+		interrupts = <1 9 0xf04>;
+	};
