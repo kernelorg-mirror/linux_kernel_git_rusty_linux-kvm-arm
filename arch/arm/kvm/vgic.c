@@ -814,8 +814,7 @@ int kvm_vgic_hyp_init(void)
 		goto out_unmap;
 	}
 
-	ret = create_hyp_io_mappings(kvm_hyp_pgd,
-				     vgic_vctrl_base,
+	ret = create_hyp_io_mappings(vgic_vctrl_base,
 				     vgic_vctrl_base + resource_size(&vctrl_res),
 				     vctrl_res.start);
 	if (ret) {
