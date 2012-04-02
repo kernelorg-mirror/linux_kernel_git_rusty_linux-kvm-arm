@@ -794,7 +794,7 @@ int kvm_vgic_hyp_init(void)
 	unsigned int irq;
 	struct resource vctrl_res;
 
-	vgic_node = of_find_compatible_node(NULL, NULL, "arm,vgic");
+	vgic_node = of_find_compatible_node(NULL, NULL, "arm,cortex-a15-gic");
 	if (!vgic_node)
 		return -ENODEV;
 
@@ -817,13 +817,13 @@ int kvm_vgic_hyp_init(void)
 		goto out_free_vcpus;
 	}
 	
-	ret = of_address_to_resource(vgic_node, 0, &vctrl_res);
+	ret = of_address_to_resource(vgic_node, 2, &vctrl_res);
 	if (ret) {
 		kvm_err("Cannot obtain VCTRL resource\n");
 		goto out_free_irq;
 	}
 
-	vgic_vctrl_base = of_iomap(vgic_node, 0);
+	vgic_vctrl_base = of_iomap(vgic_node, 2);
 	if (!vgic_vctrl_base) {
 		kvm_err("Cannot ioremap VCTRL\n");
 		ret = -ENOMEM;
@@ -858,7 +858,7 @@ int kvm_vgic_init(struct kvm *kvm)
 
 	mutex_lock(&kvm->lock);
 
-	if (of_address_to_resource(vgic_node, 1, &vcpu_res)) {
+	if (of_address_to_resource(vgic_node, 3, &vcpu_res)) {
 		kvm_err("Cannot obtain VCPU resource\n");
 		ret = -ENXIO;
 		goto out;
