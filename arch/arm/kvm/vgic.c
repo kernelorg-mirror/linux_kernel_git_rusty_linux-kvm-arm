@@ -20,24 +20,23 @@
 #include <linux/kvm_host.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
+#include <linux/of.h>
+#include <linux/of_address.h>
+#include <linux/of_irq.h>
 
 #include <asm/hardware/gic.h>
 #include <asm/kvm_arm.h>
 #include <asm/kvm_mmu.h>
 
-/* Temporary hacks, need to probe DT instead */
+/* Temporary hacks, need to be provided by userspace emulation */
 #define VGIC_DIST_BASE		0x2c001000
 #define VGIC_DIST_SIZE		0x1000
 #define VGIC_CPU_BASE		0x2c002000
 #define VGIC_CPU_SIZE		0x2000
-#define VGIC_VCTRL_BASE		0x2c004000
-#define VGIC_VCTRL_SIZE		0x2000
-#define VGIC_VCPU_BASE		0x2c006000
-#define VGIC_VCPU_SIZE		0x2000
-#define VGIC_MAINT_IRQ		25
 
 static struct kvm_vcpu __percpu **vgic_vcpus;
 static void __iomem *vgic_vctrl_base;
+static struct device_node *vgic_node;
 
 #define ACCESS_READ_VALUE	(1 << 0)
 #define ACCESS_READ_RAZ		(0 << 0)
@@ -778,6 +777,12 @@ void kvm_vgic_vcpu_init(struct kvm_vcpu *vcpu)
 int kvm_vgic_hyp_init(void)
 {
 	int ret;
+	unsigned int irq;
+	struct resource vctrl_res;
+
+	vgic_node = of_find_compatible_node(NULL, NULL, "arm,cortex-a15-gic");
+	if (!vgic_node)
+		return -ENODEV;
 
 	vgic_vcpus = alloc_percpu(struct kvm_vcpu *);
 	if (!vgic_vcpus) {
@@ -785,34 +790,47 @@ int kvm_vgic_hyp_init(void)
 		return -ENOMEM;
 	}
 
-	ret = request_percpu_irq(VGIC_MAINT_IRQ, kvm_vgic_maintainance_handler,
+	irq = irq_of_parse_and_map(vgic_node, 0);
+	if (!irq) {
+		ret = -ENXIO;
+		goto out_free_vcpus;
+	}
+
+	ret = request_percpu_irq(irq, kvm_vgic_maintainance_handler,
 				 "vgic", vgic_vcpus);
 	if (ret) {
-		kvm_err("Cannot register interrupt %d\n", VGIC_MAINT_IRQ);
+		kvm_err("Cannot register interrupt %d\n", irq);
 		goto out_free_vcpus;
 	}
 	
-	vgic_vctrl_base = ioremap(VGIC_VCTRL_BASE, VGIC_VCTRL_SIZE);
-	if (!vgic_vctrl_base) {
-		kvm_err("Cannot ioremap VCTRL\n");
+	ret = of_address_to_resource(vgic_node, 2, &vctrl_res);
+	if (ret) {
+		kvm_err("Cannot obtain VCTRL resource\n");
 		goto out_free_irq;
 	}
 
-	ret = create_hyp_io_mappings(kvm_hyp_pgd,
-				     vgic_vctrl_base,
-				     vgic_vctrl_base + VGIC_VCTRL_SIZE,
-				     VGIC_VCTRL_BASE);
+	vgic_vctrl_base = of_iomap(vgic_node, 2);
+	if (!vgic_vctrl_base) {
+		kvm_err("Cannot ioremap VCTRL\n");
+		ret = -ENOMEM;
+		goto out_free_irq;
+	}
+
+	ret = create_hyp_io_mappings(vgic_vctrl_base,
+				     vgic_vctrl_base + resource_size(&vctrl_res),
+				     vctrl_res.start);
 	if (ret) {
 		kvm_err("Cannot map VCTRL into hyp\n");
 		goto out_unmap;
 	}
 
+	kvm_info("%s@%llx IRQ%d\n", vgic_node->name, vctrl_res.start, irq);
 	return 0;
 
 out_unmap:
 	iounmap(vgic_vctrl_base);	
 out_free_irq:
-	free_percpu_irq(VGIC_MAINT_IRQ, vgic_vcpus);
+	free_percpu_irq(irq, vgic_vcpus);
 out_free_vcpus:
 	free_percpu(vgic_vcpus);
 
@@ -821,17 +839,27 @@ out_free_vcpus:
 
 int kvm_vgic_init(struct kvm *kvm)
 {
-	int ret = -EEXIST;
+	int ret;
+	struct resource vcpu_res;
 
 	mutex_lock(&kvm->lock);
-	if (atomic_read(&kvm->online_vcpus))
+
+	if (of_address_to_resource(vgic_node, 3, &vcpu_res)) {
+		kvm_err("Cannot obtain VCPU resource\n");
+		ret = -ENXIO;
 		goto out;
+	}
+
+	if (atomic_read(&kvm->online_vcpus)) {
+		ret = -EEXIST;
+		goto out;
+	}
 
 	spin_lock_init(&kvm->arch.vgic.lock);
 	kvm->arch.vgic.vctrl_base = vgic_vctrl_base;
 
 	ret = kvm_phys_addr_ioremap(kvm, VGIC_CPU_BASE,
-				    VGIC_VCPU_BASE, VGIC_CPU_SIZE);
+				    vcpu_res.start, VGIC_CPU_SIZE);
 	if (ret)
 		kvm_err("Unable to remap VGIC CPU to VCPU\n");
 out:
