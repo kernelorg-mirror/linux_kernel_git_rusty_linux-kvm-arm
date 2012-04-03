@@ -290,62 +290,62 @@ struct mmio_range {
 
 static const struct mmio_range vgic_ranges[] = {
 	{			/* CTRL, TYPER, IIDR */
-		.base		= VGIC_DIST_BASE,
+		.base		= 0,
 		.len		= 12,
 		.handle_mmio	= handle_mmio_misc,
 	},
 	{			/* IGROUPRn */
-		.base		= VGIC_DIST_BASE + 0x80,
+		.base		= 0x80,
 		.len		= VGIC_NR_IRQS / 8,
 		.handle_mmio	= handle_mmio_group_reg,
 	},
 	{			/* ISENABLERn */
-		.base		= VGIC_DIST_BASE + 0x100,
+		.base		= 0x100,
 		.len		= VGIC_NR_IRQS / 8,
 		.handle_mmio	= handle_mmio_set_enable_reg,
 	},
 	{			/* ICENABLERn */
-		.base		= VGIC_DIST_BASE + 0x180,
+		.base		= 0x180,
 		.len		= VGIC_NR_IRQS / 8,
 		.handle_mmio	= handle_mmio_clear_enable_reg,
 	},
 	{			/* ISPENDRn */
-		.base		= VGIC_DIST_BASE + 0x200,
+		.base		= 0x200,
 		.len		= VGIC_NR_IRQS / 8,
 		.handle_mmio	= handle_mmio_set_pending_reg,
 	},
 	{			/* ICPENDRn */
-		.base		= VGIC_DIST_BASE + 0x280,
+		.base		= 0x280,
 		.len		= VGIC_NR_IRQS / 8,
 		.handle_mmio	= handle_mmio_clear_pending_reg,
 	},
 	{			/* ISACTIVERn */
-		.base		= VGIC_DIST_BASE + 0x300,
+		.base		= 0x300,
 		.len		= VGIC_NR_IRQS / 8,
 		.handle_mmio	= handle_mmio_set_active_reg,
 	},
 	{			/* ICACTIVERn */
-		.base		= VGIC_DIST_BASE + 0x380,
+		.base		= 0x380,
 		.len		= VGIC_NR_IRQS / 8,
 		.handle_mmio	= handle_mmio_clear_active_reg,
 	},
 	{			/* IPRIORITYRn */
-		.base		= VGIC_DIST_BASE + 0x400,
+		.base		= 0x400,
 		.len		= VGIC_NR_IRQS,
 		.handle_mmio	= handle_mmio_priority_reg,
 	},
 	{			/* ITARGETSRn */
-		.base		= VGIC_DIST_BASE + 0x800,
+		.base		= 0x800,
 		.len		= VGIC_NR_IRQS,
 		.handle_mmio	= handle_mmio_target_reg,
 	},
 	{			/* ICFGRn */
-		.base		= VGIC_DIST_BASE + 0xC00,
+		.base		= 0xC00,
 		.len		= VGIC_NR_IRQS / 4,
 		.handle_mmio	= handle_mmio_cfg_reg,
 	},
 	{			/* SGIRn */
-		.base		= VGIC_DIST_BASE + 0xF00,
+		.base		= 0xF00,
 		.len		= 4,
 		.handle_mmio	= handle_mmio_sgi_reg,
 	},
@@ -354,12 +354,14 @@ static const struct mmio_range vgic_ranges[] = {
 
 static const
 struct mmio_range *find_matching_range(const struct mmio_range *ranges,
-				       struct kvm_run *run)
+				       struct kvm_run *run, unsigned long base)
 {
 	const struct mmio_range *r = ranges;
+	unsigned long addr = run->mmio.phys_addr - base;
+
 	while (r->len) {
-		if (run->mmio.phys_addr >= r->base &&
-		    (run->mmio.phys_addr + run->mmio.len) <= (r->base + r->len))
+		if (addr >= r->base &&
+		    (addr + run->mmio.len) <= (r->base + r->len))
 			return r;
 		r++;
 	}
@@ -370,18 +372,25 @@ struct mmio_range *find_matching_range(const struct mmio_range *ranges,
 int vgic_handle_mmio(struct kvm_vcpu *vcpu, struct kvm_run *run)
 {
 	const struct mmio_range *range;
+	struct vgic_dist *dist = &vcpu->kvm->arch.vgic;
+	unsigned long base = dist->vgic_dist_base;
 
-	if (!irqchip_in_kernel(vcpu->kvm))
+	if (!irqchip_in_kernel(vcpu->kvm) ||
+	    run->mmio.phys_addr < base ||
+	    (run->mmio.phys_addr + run->mmio.len) > (base + dist->vgic_dist_size))
 		return KVM_EXIT_MMIO;
 
-	range = find_matching_range(vgic_ranges, run);
-	if (!range || !range->handle_mmio)
+	range = find_matching_range(vgic_ranges, run, base);
+	if (unlikely(!range || !range->handle_mmio)) {
+		pr_warn("Unhandled access %d %08llx %d\n",
+			run->mmio.is_write, run->mmio.phys_addr, run->mmio.len);
 		return KVM_EXIT_MMIO;
+	}
 
 	spin_lock(&vcpu->kvm->arch.vgic.lock);
 	pr_debug("emulating %d %08llx %d\n", run->mmio.is_write,
 		 run->mmio.phys_addr, run->mmio.len);
-	range->handle_mmio(vcpu, run, run->mmio.phys_addr - range->base);
+	range->handle_mmio(vcpu, run, run->mmio.phys_addr - range->base - base);
 	kvm_handle_mmio_return(vcpu, run);
 	spin_unlock(&vcpu->kvm->arch.vgic.lock);
 
@@ -857,6 +866,8 @@ int kvm_vgic_init(struct kvm *kvm)
 
 	spin_lock_init(&kvm->arch.vgic.lock);
 	kvm->arch.vgic.vctrl_base = vgic_vctrl_base;
+	kvm->arch.vgic.vgic_dist_base = VGIC_DIST_BASE;
+	kvm->arch.vgic.vgic_dist_size = VGIC_DIST_SIZE;
 
 	ret = kvm_phys_addr_ioremap(kvm, VGIC_CPU_BASE,
 				    vcpu_res.start, VGIC_CPU_SIZE);
