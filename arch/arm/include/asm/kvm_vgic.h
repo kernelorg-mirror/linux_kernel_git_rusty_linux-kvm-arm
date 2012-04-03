@@ -85,6 +85,8 @@ struct vgic_dist {
 	spinlock_t		lock;
 
 	void __iomem		*vctrl_base;
+	unsigned long		vgic_dist_base;
+	unsigned long		vgic_dist_size;
 
 	u32			enabled;
 
