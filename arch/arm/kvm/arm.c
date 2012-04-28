@@ -231,12 +231,13 @@ void kvm_arch_vcpu_free(struct kvm_vcpu *vcpu)
 
 void kvm_arch_vcpu_destroy(struct kvm_vcpu *vcpu)
 {
+	kvm_timer_vcpu_terminate(vcpu);
 	kvm_arch_vcpu_free(vcpu);
 }
 
 int kvm_cpu_has_pending_timer(struct kvm_vcpu *vcpu)
 {
-	return 0;
+	return vcpu->arch.timer_cpu.armed;
 }
 
 int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
@@ -262,6 +263,9 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 
 	/* Set up VGIC */
 	kvm_vgic_vcpu_init(vcpu);
+
+	/* Set up the timer */
+	kvm_timer_vcpu_init(vcpu);
 
 	return 0;
 }
@@ -511,9 +515,11 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu, struct kvm_run *run)
 		kvm_guest_enter();
 		vcpu->mode = IN_GUEST_MODE;
 		kvm_vgic_sync_to_cpu(vcpu);
+		kvm_timer_sync_to_cpu(vcpu);
 
 		ret = __kvm_vcpu_run(vcpu);
 
+		kvm_timer_sync_from_cpu(vcpu);
 		kvm_vgic_sync_from_cpu(vcpu);
 		vcpu->mode = OUTSIDE_GUEST_MODE;
 		vcpu->stat.exits++;
@@ -778,6 +784,13 @@ static int init_hyp_mode(void)
 	if (err)
 		goto out_free_mappings;
 
+	/*
+	 * Init HYP architected timer support
+	 */
+	err = kvm_timer_hyp_init();
+	if (err)
+		goto out_free_mappings;
+	
 	/*
 	 * Set the HVBAR to the virtual kernel address
 	 */

@@ -15,7 +15,7 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
-
+//#define DEBUG 1
 #include <linux/kvm.h>
 #include <linux/kvm_host.h>
 #include <linux/interrupt.h>
@@ -550,7 +550,7 @@ static void __kvm_vgic_sync_to_cpu(struct kvm_vcpu *vcpu)
 	 */
 	if (!kvm_vgic_vcpu_pending_irq(vcpu) ||
 	    !compute_pending_for_cpu(vcpu)) {
-		pr_debug("CPU%d has no pending interrupt\n", vcpu->vcpu_id);
+		//pr_debug("CPU%d has no pending interrupt\n", vcpu->vcpu_id);
 		goto epilog;
 	}
 
@@ -685,6 +685,11 @@ void kvm_vgic_sync_from_cpu(struct kvm_vcpu *vcpu)
 	spin_unlock(&dist->lock);
 
 	*__this_cpu_ptr(vgic_vcpus) = NULL;
+}
+
+struct kvm_vcpu *kvm_vgic_get_current_vcpu(void)
+{
+	return *__this_cpu_ptr(vgic_vcpus);
 }
 
 int kvm_vgic_vcpu_pending_irq(struct kvm_vcpu *vcpu)
