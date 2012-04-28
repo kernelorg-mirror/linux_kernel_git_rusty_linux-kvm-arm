@@ -39,7 +39,6 @@ static void kvm_timer_inject_irq(struct kvm_vcpu *vcpu)
 	struct arch_timer_cpu *timer = &vcpu->arch.timer_cpu;
 
 	timer->cntv_ctl |= 1 << 1; /* Mask the interrupt in the guest */
-	kvm_err("timer tick on vcpu%d cntv_clt = %d\n", vcpu->vcpu_id, timer->cntv_ctl);
 	kvm_vgic_inject_irq(vcpu->kvm, vcpu->vcpu_id, virt_timer_ppi);
 }
 
@@ -50,7 +49,6 @@ static irqreturn_t kvm_arch_timer_handler(int irq, void *dev_id)
 	if (WARN_ON(!vcpu))
 		return IRQ_NONE;
 
-	kvm_err("kvm_arch_timer_handler\n");
 	kvm_timer_inject_irq(vcpu);
 	return IRQ_HANDLED;
 }
@@ -67,7 +65,6 @@ static void kvm_timer_inject_irq_work(struct work_struct *work)
 static enum hrtimer_restart kvm_timer_expire(struct hrtimer *hrt)
 {
 	struct arch_timer_cpu *timer;
-	kvm_err("kvm_timer_expire\n");
 	timer = container_of(hrt, struct arch_timer_cpu, timer);
 	queue_work(wqueue, &timer->expired);
 	return HRTIMER_NORESTART;
@@ -93,7 +90,6 @@ void kvm_timer_sync_from_cpu(struct kvm_vcpu *vcpu)
 	if (timer->armed) {
 		if (cval == timer->cval)
 			return;		/* Already programmed */
-		kvm_err("cancel %lld %lld\n", timer->cval, cval);
 		hrtimer_cancel(&timer->timer);
 		cancel_work_sync(&timer->expired);
 		timer->armed = false;
@@ -104,7 +100,6 @@ void kvm_timer_sync_from_cpu(struct kvm_vcpu *vcpu)
 		 * Timer has already expired while we were not
 		 * looking. Inject the interrupt and carry on.
 		 */
-		kvm_err("kvm_timer_sync_from_cpu\n");
 		kvm_timer_inject_irq(vcpu);
 		return;
 	}
@@ -112,24 +107,14 @@ void kvm_timer_sync_from_cpu(struct kvm_vcpu *vcpu)
 	timer->cval = cval;
 	timer->armed = true;
 	ns = cyclecounter_cyc2ns(timecounter->cc, cval - now);
-	kvm_err("hrtimer_start %lld %lld\n", cval, ns);
 	hrtimer_start(&timer->timer, ktime_add_ns(ktime_get(), ns),
 		      HRTIMER_MODE_ABS);
-	kvm_err("hrtimer_started\n");
 }
 
 void kvm_timer_vcpu_init(struct kvm_vcpu *vcpu)
 {
 	struct arch_timer_cpu *timer = &vcpu->arch.timer_cpu;
-	cycle_t cntvoff = vcpu->kvm->arch.timer.cntvoff;
 
-	if (!cntvoff) {
-		cntvoff = kvm_phys_timer_read();
-		vcpu->kvm->arch.timer.cntvoff = cntvoff;
-	}
-
-	timer->cntvoff_high = (u32)(cntvoff >> 32);
-	timer->cntvoff_low  = (u32)(cntvoff & (u32)~0);
 	INIT_WORK(&timer->expired, kvm_timer_inject_irq_work);
 	hrtimer_init(&timer->timer, CLOCK_MONOTONIC, HRTIMER_MODE_ABS);
 	timer->timer.function = kvm_timer_expire;
@@ -155,4 +140,15 @@ void kvm_timer_vcpu_terminate(struct kvm_vcpu *vcpu)
 
 	hrtimer_cancel(&timer->timer);
 	cancel_work_sync(&timer->expired);
+}
+
+int kvm_timer_init(struct kvm *kvm)
+{
+#if 0
+	kvm->arch.timer.cntvoff = kvm_phys_timer_read();
+#endif
+	if (timecounter && wqueue)
+		kvm->arch.timer.enabled = 1;
+
+	return 0;
 }

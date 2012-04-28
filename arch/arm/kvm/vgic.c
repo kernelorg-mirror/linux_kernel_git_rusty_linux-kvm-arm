@@ -815,17 +815,17 @@ int kvm_vgic_hyp_init(void)
 		goto out_free_vcpus;
 	}
 	
+	ret = of_address_to_resource(vgic_node, 0, &vctrl_res);
+	if (ret) {
+		kvm_err("Cannot obtain VCTRL resource\n");
+		goto out_free_irq;
+	}
+
 	vgic_vctrl_base = of_iomap(vgic_node, 0);
 	if (!vgic_vctrl_base) {
 		kvm_err("Cannot ioremap VCTRL\n");
 		ret = -ENOMEM;
 		goto out_free_irq;
-	}
-
-	ret = of_address_to_resource(vgic_node, 0, &vctrl_res);
-	if (ret) {
-		kvm_err("Cannot obtain VCTRL resource\n");
-		goto out_unmap;
 	}
 
 	ret = create_hyp_io_mappings(vgic_vctrl_base,
@@ -878,5 +878,9 @@ int kvm_vgic_init(struct kvm *kvm)
 		kvm_err("Unable to remap VGIC CPU to VCPU\n");
 out:
 	mutex_unlock(&kvm->lock);
+
+	if (!ret)
+		kvm_timer_init(kvm);
+
 	return ret;
 }

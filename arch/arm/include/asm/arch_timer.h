@@ -28,7 +28,6 @@ static inline struct timecounter *arch_timer_get_timecounter(void)
 void arch_timer_switch_to_phys(irq_handler_t handler)
 {
 }
-#else
 #endif
 
 #endif

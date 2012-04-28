@@ -237,7 +237,7 @@ void kvm_arch_vcpu_destroy(struct kvm_vcpu *vcpu)
 
 int kvm_cpu_has_pending_timer(struct kvm_vcpu *vcpu)
 {
-	return vcpu->arch.timer_cpu.armed;
+	return 0;
 }
 
 int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)

@@ -195,8 +195,8 @@ static irqreturn_t arch_timer_handler(int irq, void *dev_id)
 
 	ctrl = arch_timer_reg_read(ARCH_TIMER_REG_CTRL);
 	if (ctrl & ARCH_TIMER_CTRL_IT_STAT) {
-		//pr_err("arch_timer_handler\n");
 		ctrl |= ARCH_TIMER_CTRL_IT_MASK;
+		ctrl &= ~ARCH_TIMER_CTRL_IT_STAT;
 		arch_timer_reg_write(ARCH_TIMER_REG_CTRL, ctrl);
 		evt->event_handler(evt);
 		return IRQ_HANDLED;
@@ -213,6 +213,7 @@ static irqreturn_t arch_timer_virt_handler(int irq, void *dev_id)
 		ctrl = arch_timer_virt_reg_read(ARCH_TIMER_REG_CTRL);
 		if (ctrl & ARCH_TIMER_CTRL_IT_STAT) {
 			ctrl |= ARCH_TIMER_CTRL_IT_MASK;
+			ctrl &= ~ARCH_TIMER_CTRL_IT_STAT;
 			arch_timer_virt_reg_write(ARCH_TIMER_REG_CTRL, ctrl);
 			return arch_timer_virt_external_handler(irq, NULL);
 		}
@@ -228,7 +229,7 @@ static void arch_timer_disable(void)
 	unsigned long ctrl;
 
 	ctrl = arch_timer_reg_read(ARCH_TIMER_REG_CTRL);
-	ctrl &= ~ARCH_TIMER_CTRL_ENABLE;
+	ctrl &= ~(ARCH_TIMER_CTRL_ENABLE | ARCH_TIMER_CTRL_IT_STAT);
 	arch_timer_reg_write(ARCH_TIMER_REG_CTRL, ctrl);
 }
 
@@ -252,9 +253,8 @@ static int arch_timer_set_next_event(unsigned long evt,
 
 	ctrl = arch_timer_reg_read(ARCH_TIMER_REG_CTRL);
 	ctrl |= ARCH_TIMER_CTRL_ENABLE;
-	ctrl &= ~ARCH_TIMER_CTRL_IT_MASK;
+	ctrl &= ~(ARCH_TIMER_CTRL_IT_MASK | ARCH_TIMER_CTRL_IT_STAT);
 
-	//pr_err("next_event: %08lx", evt);
 	arch_timer_reg_write(ARCH_TIMER_REG_TVAL, evt);
 	arch_timer_reg_write(ARCH_TIMER_REG_CTRL, ctrl);
 
@@ -427,6 +427,9 @@ static int __init arch_timer_register(void)
 	for (i = PHYS_SECURE_PPI; i < MAX_TIMER_PPI; i++) {
 		irq_handler_t handler = arch_timer_handler;
 
+		if (!arch_timer_ppi[i])
+			continue;
+
 		if (i == VIRT_PPI)
 			handler = arch_timer_virt_handler;
 
@@ -494,8 +497,16 @@ int __init arch_timer_of_register(void)
 
 	for (i = PHYS_SECURE_PPI; i < MAX_TIMER_PPI; i++) {
 		arch_timer_ppi[i] = irq_of_parse_and_map(np, i);
-		if (!arch_timer_ppi[i])
+		if (!arch_timer_ppi[i]) {
+			/*
+			 * No interrupt provided for virtual timer,
+			 * we'll have to stick to the physical timer.
+			 */
+			if (i == VIRT_PPI)
+				arch_timer_use_virtual = false;
+			
 			continue;
+		}
 		pr_cont("%d ", arch_timer_ppi[i]);
 	}
 
@@ -527,6 +538,8 @@ static void arch_timer_switch_cpu_to_phys(void *dummy)
 		     : "=r" (cvall), "=r" (cvalh));
 
 	isb();
+
+	//disable_percpu_irq(arch_timer_ppi[VIRT_PPI]);
 	
 	val = arch_timer_virt_reg_read(ARCH_TIMER_REG_CTRL);
 	arch_timer_virt_reg_write(ARCH_TIMER_REG_CTRL,
@@ -538,6 +551,9 @@ static void arch_timer_switch_cpu_to_phys(void *dummy)
 void arch_timer_switch_to_phys(irq_handler_t handler)
 {
 	int cpu;
+
+	if (!arch_timer_use_virtual)
+		return;
 
 	arch_timer_use_virtual = false;
 	arch_timer_virt_external_handler = handler;
