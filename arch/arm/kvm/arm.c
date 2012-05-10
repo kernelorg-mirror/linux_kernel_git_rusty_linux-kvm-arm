@@ -322,10 +322,13 @@ void kvm_arch_vcpu_load(struct kvm_vcpu *vcpu, int cpu)
 	 */
 	if (cpumask_test_and_clear_cpu(cpu, &vcpu->arch.require_dcache_flush))
 		flush_cache_all(); /* We'd really want v7_flush_dcache_all() */
+
+	kvm_arm_set_running_vcpu(vcpu);
 }
 
 void kvm_arch_vcpu_put(struct kvm_vcpu *vcpu)
 {
+	kvm_arm_set_running_vcpu(NULL);
 }
 
 int kvm_arch_vcpu_ioctl_set_guest_debug(struct kvm_vcpu *vcpu,
@@ -621,11 +624,9 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu, struct kvm_run *run)
 		trace_kvm_entry(vcpu->arch.regs.pc);
 		kvm_guest_enter();
 		vcpu->mode = IN_GUEST_MODE;
-		kvm_arm_set_running_vcpu(vcpu);
 
 		ret = __kvm_vcpu_run(vcpu);
 
-		kvm_arm_set_running_vcpu(NULL);
 		vcpu->mode = OUTSIDE_GUEST_MODE;
 		vcpu->stat.exits++;
 		kvm_guest_exit();
