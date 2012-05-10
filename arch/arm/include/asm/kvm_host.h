@@ -143,4 +143,7 @@ static inline void kvm_set_spte_hva(struct kvm *kvm, unsigned long hva,
 {
 }
 
+struct kvm_vcpu *kvm_arm_get_running_vcpu(void);
+struct kvm_vcpu __percpu **kvm_get_running_vcpus(void);
+
 #endif /* __ARM_KVM_HOST_H__ */

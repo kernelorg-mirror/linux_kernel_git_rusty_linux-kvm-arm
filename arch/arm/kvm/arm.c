@@ -41,12 +41,39 @@
 
 static DEFINE_PER_CPU(unsigned long, kvm_arm_hyp_stack_page);
 
+/* Per-CPU variable containing the currently running vcpu. */
+static DEFINE_PER_CPU(struct kvm_vcpu *, kvm_arm_running_vcpu);
+
 /* The VMID used in the VTTBR */
 #define VMID_BITS               8
 #define VMID_MASK               ((1 << VMID_BITS) - 1)
 #define VMID_FIRST_GENERATION	(1 << VMID_BITS)
 static u64 next_vmid;		/* The next available VMID in the sequence */
 DEFINE_SPINLOCK(kvm_vmid_lock);
+
+static void kvm_arm_set_running_vcpu(struct kvm_vcpu *vcpu)
+{
+	BUG_ON(preemptible());
+	__get_cpu_var(kvm_arm_running_vcpu) = vcpu;
+}
+
+/**
+ * kvm_arm_get_running_vcpu - get the vcpu running on the current CPU.
+ * Must be called from non-preemptible context
+ */
+struct kvm_vcpu *kvm_arm_get_running_vcpu(void)
+{
+	BUG_ON(preemptible());
+	return __get_cpu_var(kvm_arm_running_vcpu);
+}
+
+/**
+ * kvm_arm_get_running_vcpus - get the per-CPU array on currently running vcpus.
+ */
+struct kvm_vcpu __percpu **kvm_get_running_vcpus(void)
+{
+	return &kvm_arm_running_vcpu;
+}
 
 int kvm_arch_hardware_enable(void *garbage)
 {
@@ -509,9 +536,11 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu, struct kvm_run *run)
 		local_irq_disable();
 		kvm_guest_enter();
 		vcpu->mode = IN_GUEST_MODE;
+		kvm_arm_set_running_vcpu(vcpu);
 
 		ret = __kvm_vcpu_run(vcpu);
 
+		kvm_arm_set_running_vcpu(NULL);
 		vcpu->mode = OUTSIDE_GUEST_MODE;
 		kvm_guest_exit();
 		local_irq_enable();
