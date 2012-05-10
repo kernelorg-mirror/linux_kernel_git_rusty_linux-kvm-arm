@@ -687,6 +687,11 @@ void kvm_vgic_sync_from_cpu(struct kvm_vcpu *vcpu)
 	*__this_cpu_ptr(vgic_vcpus) = NULL;
 }
 
+struct kvm_vcpu *kvm_vgic_get_current_vcpu(void)
+{
+	return *__this_cpu_ptr(vgic_vcpus);
+}
+
 int kvm_vgic_vcpu_pending_irq(struct kvm_vcpu *vcpu)
 {
 	struct vgic_dist *dist = &vcpu->kvm->arch.vgic;
