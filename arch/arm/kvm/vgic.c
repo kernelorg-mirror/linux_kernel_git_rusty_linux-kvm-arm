@@ -880,5 +880,9 @@ int kvm_vgic_init(struct kvm *kvm)
 		kvm_err("Unable to remap VGIC CPU to VCPU\n");
 out:
 	mutex_unlock(&kvm->lock);
+
+	if (!ret)
+		kvm_timer_init(kvm);
+
 	return ret;
 }
