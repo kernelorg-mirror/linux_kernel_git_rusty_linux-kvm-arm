@@ -263,11 +263,15 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 	/* Set up VGIC */
 	kvm_vgic_vcpu_init(vcpu);
 
+	/* Set up the timer */
+	kvm_timer_vcpu_init(vcpu);
+
 	return 0;
 }
 
 void kvm_arch_vcpu_uninit(struct kvm_vcpu *vcpu)
 {
+	kvm_timer_vcpu_terminate(vcpu);
 }
 
 void kvm_arch_vcpu_load(struct kvm_vcpu *vcpu, int cpu)
@@ -784,6 +788,13 @@ static int init_hyp_mode(void)
 	if (err)
 		goto out_free_mappings;
 
+	/*
+	 * Init HYP architected timer support
+	 */
+	err = kvm_timer_hyp_init();
+	if (err)
+		goto out_free_mappings;
+	
 	/*
 	 * Set the HVBAR to the virtual kernel address
 	 */
