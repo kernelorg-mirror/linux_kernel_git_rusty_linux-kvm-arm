@@ -21,6 +21,12 @@
 	*(.idmap.text)							\
 	VMLINUX_SYMBOL(__idmap_text_end) = .;
 
+#define HYP_IDMAP_TEXT							\
+	. = ALIGN(PAGE_SIZE);						\
+	VMLINUX_SYMBOL(__hyp_idmap_text_start) = .;			\
+	*(.hyp_idmap.text)						\
+	VMLINUX_SYMBOL(__hyp_idmap_text_end) = .;
+
 #ifdef CONFIG_HOTPLUG_CPU
 #define ARM_CPU_DISCARD(x)
 #define ARM_CPU_KEEP(x)		x
@@ -101,6 +107,7 @@ SECTIONS
 			LOCK_TEXT
 			KPROBES_TEXT
 			IDMAP_TEXT
+			HYP_IDMAP_TEXT
 #ifdef CONFIG_MMU
 			*(.fixup)
 #endif
