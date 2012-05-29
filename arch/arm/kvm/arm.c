@@ -627,7 +627,7 @@ static void cpu_init_hyp_mode(void *vector)
 
 	cpu_set_vector(vector);
 
-	pgd_ptr = virt_to_phys(kvm_hyp_pgd_get());
+	pgd_ptr = virt_to_phys(hyp_pgd);
 	stack_page = __get_cpu_var(kvm_arm_hyp_stack_page);
 	hyp_stack_ptr = stack_page + PAGE_SIZE;
 
@@ -648,7 +648,7 @@ static void cpu_init_hyp_mode(void *vector)
  */
 static int init_hyp_mode(void)
 {
-	phys_addr_t init_phys_addr, init_end_phys_addr;
+	phys_addr_t init_phys_addr;
 	int cpu;
 	int err = 0;
 
@@ -670,30 +670,15 @@ static int init_hyp_mode(void)
 	}
 
 	/*
-	 * Allocate Hyp level-1 page table
-	 */
-	err = kvm_hyp_pgd_alloc();
-	if (err)
-		goto out_free_stack_pages;
-
-	init_phys_addr = virt_to_phys(__kvm_hyp_init);
-	init_end_phys_addr = virt_to_phys(__kvm_hyp_init_end);
-	BUG_ON(init_phys_addr & 0x1f);
-
-	/*
-	 * Create identity mapping for the init code.
-	 */
-	hyp_idmap_add(kvm_hyp_pgd_get(),
-		      (unsigned long)init_phys_addr,
-		      (unsigned long)init_end_phys_addr);
-
-	/*
 	 * Execute the init code on each CPU.
 	 *
 	 * Note: The stack is not mapped yet, so don't do anything else than
 	 * initializing the hypervisor mode on each CPU using a local stack
 	 * space for temporary storage.
 	 */
+	init_phys_addr = virt_to_phys(__kvm_hyp_init);
+	BUG_ON(init_phys_addr & 0x1f);
+
 	for_each_online_cpu(cpu) {
 		smp_call_function_single(cpu, cpu_init_hyp_mode,
 					 (void *)(long)init_phys_addr, 1);
@@ -702,9 +687,7 @@ static int init_hyp_mode(void)
 	/*
 	 * Unmap the identity mapping
 	 */
-	hyp_idmap_del(kvm_hyp_pgd_get(),
-		      (unsigned long)init_phys_addr,
-		      (unsigned long)init_end_phys_addr);
+	hyp_idmap_teardown();
 
 	/*
 	 * Map the Hyp-code called directly from the host
@@ -738,7 +721,6 @@ static int init_hyp_mode(void)
 	return 0;
 out_free_mappings:
 	free_hyp_pmds();
-	kvm_hyp_pgd_free();
 out_free_stack_pages:
 	for_each_possible_cpu(cpu)
 		free_page(per_cpu(kvm_arm_hyp_stack_page, cpu));
@@ -778,7 +760,6 @@ void kvm_arch_exit(void)
 	free_hyp_pmds();
 	for_each_possible_cpu(cpu)
 		free_page(per_cpu(kvm_arm_hyp_stack_page, cpu));
-	kvm_hyp_pgd_free();
 }
 
 static int arm_init(void)
