@@ -1,5 +1,6 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
+#include <linux/slab.h>
 
 #include <asm/cputype.h>
 #include <asm/idmap.h>
@@ -99,12 +100,8 @@ static int __init init_static_idmap(void)
 }
 early_initcall(init_static_idmap);
 
-#ifdef CONFIG_KVM_ARM_HOST
-void hyp_idmap_add(pgd_t *pgd, unsigned long addr, unsigned long end)
-{
-	identity_mapping_add(pgd, addr, end, PMD_SECT_AP1);
-}
-EXPORT_SYMBOL_GPL(hyp_idmap_add);
+#ifdef CONFIG_ARM_VIRT_EXT
+pgd_t *hyp_pgd;
 
 static void hyp_idmap_del_pmd(pgd_t *pgd, unsigned long addr)
 {
@@ -113,15 +110,16 @@ static void hyp_idmap_del_pmd(pgd_t *pgd, unsigned long addr)
 
 	pud = pud_offset(pgd, addr);
 	pmd = pmd_offset(pud, addr);
-	pmd_free(NULL, pmd);
 	pud_clear(pud);
+	clean_pmd_entry(pmd);
+	pmd_free(NULL, (pmd_t *)((unsigned long)pmd & PAGE_MASK));
 }
 
 /*
  * This version actually frees the underlying pmds for all pgds in range and
  * clear the pgds themselves afterwards.
  */
-void hyp_idmap_del(pgd_t *pgd, unsigned long addr, unsigned long end)
+static void hyp_idmap_del(pgd_t *pgd, unsigned long addr, unsigned long end)
 {
 	unsigned long next;
 
@@ -132,7 +130,38 @@ void hyp_idmap_del(pgd_t *pgd, unsigned long addr, unsigned long end)
 			hyp_idmap_del_pmd(pgd, addr);
 	} while (pgd++, addr = next, addr < end);
 }
-EXPORT_SYMBOL_GPL(hyp_idmap_del);
+
+extern char  __hyp_idmap_text_start[], __hyp_idmap_text_end[];
+
+void hyp_idmap_teardown(void)
+{
+	phys_addr_t idmap_start, idmap_end;
+
+	idmap_start = virt_to_phys((void *)__hyp_idmap_text_start);
+	idmap_end = virt_to_phys((void *)__hyp_idmap_text_end);
+	hyp_idmap_del(hyp_pgd, idmap_start, idmap_end);
+}
+EXPORT_SYMBOL_GPL(hyp_idmap_teardown);
+
+static int __init hyp_init_static_idmap(void)
+{
+	phys_addr_t idmap_start, idmap_end;
+
+	hyp_pgd = kzalloc(PTRS_PER_PGD * sizeof(pgd_t), GFP_KERNEL);
+	if (!hyp_pgd)
+		return -ENOMEM;
+
+	/* Add an identity mapping for the physical address of the section. */
+	idmap_start = virt_to_phys((void *)__hyp_idmap_text_start);
+	idmap_end = virt_to_phys((void *)__hyp_idmap_text_end);
+
+	pr_info("Setting up static HYP identity map for 0x%llx - 0x%llx\n",
+		(long long)idmap_start, (long long)idmap_end);
+	identity_mapping_add(hyp_pgd, idmap_start, idmap_end, PMD_SECT_AP1);
+
+	return 0;
+}
+early_initcall(hyp_init_static_idmap);
 #endif
 
 /*
