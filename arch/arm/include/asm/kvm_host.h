@@ -113,6 +113,9 @@ struct kvm_vcpu_arch {
 	u32 hpfar;		/* Hyp IPA Fault Address Register */
 	u64 pc_ipa;		/* IPA for the current PC (VA to PA result) */
 
+	/* dcache set/way operation pending */
+	cpumask_t require_dcache_flush;
+
 	/* IO related fields */
 	bool mmio_sign_extend;	/* for byte/halfword loads */
 	u32 mmio_rd;
