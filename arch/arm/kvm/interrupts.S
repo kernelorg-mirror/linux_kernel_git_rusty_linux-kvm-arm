@@ -566,40 +566,8 @@ __kvm_vcpu_return:
 	pop	{r2}			@ Pop r13_usr
 	msr	sp_usr, r2
 
-	ldr	r2, =(~PAGE_MASK)	@ Get svc-cpsr in case we need it for
-	mov	r1, sp			@ the __irq_svc call
-	tst	r1, r2
-	subeq	r2, r1, #0x1000
-	bicne	r2, r1, r2
-	ldr	r2, [r2, #4]		@ r2 = svc_cpsr
-
 	hvc	#0			@ switch back to svc-mode, see hyp_svc
 
-	cmp	r0, #ARM_EXCEPTION_IRQ
-	bxne	lr			@ return to IOCTL
-
-	/*
-	 * It's time to launch the kernel IRQ handler for IRQ exceptions. This
-	 * requires some manipulation though.
-	 *
-	 *  - The easiest entry point to the host handler is __irq_svc.
-	 *  - The __irq_svc expects to be called from SVC mode, which has been
-	 *    switched to from vector_stub code in entry-armv.S. The __irq_svc
-	 *    calls svc_entry which uses values stored in memory and pointed to
-	 *    by r0 to return from handler. We allocate this memory on the
-	 *    stack, which will contain these values:
-	 *      0x8:   cpsr
-	 *      0x4:   return_address
-	 *      0x0:   r0
-	 */
-	adr	r1, irq_kernel_resume	@ Where to resume
-	push	{r0 - r2}
-	mov	r0, sp
-	b	__irq_svc
-
-irq_kernel_resume:
-	pop	{r0}
-	add	sp, sp, #8
 	bx	lr			@ return to IOCTL
 
 @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@

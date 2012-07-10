@@ -631,6 +631,16 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu, struct kvm_run *run)
 		vcpu->stat.exits++;
 		kvm_guest_exit();
 		trace_kvm_exit(vcpu->arch.regs.pc);
+		/*
+		 * We may have taken a host interrupt in HYP mode (ie
+		 * while executing the guest). This interrupt is still
+		 * pending, as we haven't serviced it yet!
+		 *
+		 * We're now back in SVC mode, with interrupts
+		 * disabled.  Enabling the interrupts now will have
+		 * the effect of taking the interrupt again, in SVC
+		 * mode this time.
+		 */
 		local_irq_enable();
 
 		/*
