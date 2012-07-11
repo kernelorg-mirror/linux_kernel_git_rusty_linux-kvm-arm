@@ -62,6 +62,7 @@
 /*
  * The bits we set in HCR:
  * TAC:		Trap ACTLR
+ * TIDCP:	Trap L2CTRL (on A15)
  * TSC:		Trap SMC
  * TSW:		Trap cache operations by set/way
  * TWI:		Trap WFI
@@ -74,7 +75,7 @@
  */
 #define HCR_GUEST_MASK (HCR_TSC | HCR_TSW | HCR_TWI | HCR_VM | HCR_BSU_IS | \
 			HCR_FB | HCR_TAC | HCR_AMO | HCR_IMO | HCR_FMO | \
-			HCR_SWIO)
+			HCR_TIDCP | HCR_SWIO)
 #define HCR_VIRT_EXCP_MASK (HCR_VA | HCR_VI | HCR_VF)
 
 /* System Control Register (SCTLR) bits */

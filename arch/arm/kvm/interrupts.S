@@ -409,9 +409,9 @@ ENDPROC(__kvm_flush_vm_context)
  * (hardware reset value is 0) */
 .macro set_hstr entry
 	mrc	p15, 4, r2, c1, c1, 3
-	ldr	r3, =(HSTR_T(9) | HSTR_T(10) | HSTR_T(11) | HSTR_T(15))
+	ldr	r3, =HSTR_T(15)
 	.if \entry == 1
-	orr	r2, r2, r3		@ Trap CR{9,10,11,15}
+	orr	r2, r2, r3		@ Trap CRn=15
 	.else
 	bic	r2, r2, r3		@ Don't trap any CRx accesses
 	.endif
