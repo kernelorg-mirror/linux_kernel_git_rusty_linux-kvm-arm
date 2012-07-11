@@ -2,11 +2,17 @@
 # Makefile for Kernel-based Virtual Machine module
 #
 
+plus_virt := $(call as-instr,.arch_extension virt,+virt)
+ifeq ($(plus_virt),+virt)
+	plus_virt_def := -DREQUIRES_VIRT=1
+endif
+
 ccflags-y += -Ivirt/kvm -Iarch/arm/kvm
-CFLAGS_arm.o     := -I.
+CFLAGS_arm.o     := -I. $(call as-instr,.arch_extension sec,-DREQUIRES_SEC=1) $(plus_virt_def)
 CFLAGS_mmu.o := -I.
 
-AFLAGS_interrupts.o := -I$(obj)
+AFLAGS_init.o := -Wa,-march=armv7-a$(plus_virt)
+AFLAGS_interrupts.o := -Wa,-march=armv7-a$(plus_virt)
 
 obj-$(CONFIG_KVM_ARM_HOST) += init.o interrupts.o exports.o
 

@@ -44,6 +44,13 @@
 #include <asm/kvm_mmu.h>
 #include <asm/kvm_emulate.h>
 
+#ifdef REQUIRES_SEC
+__asm__(".arch_extension	sec");
+#endif
+#ifdef REQUIRES_VIRT
+__asm__(".arch_extension	virt");
+#endif
+
 static DEFINE_PER_CPU(unsigned long, kvm_arm_hyp_stack_page);
 
 /* Per-CPU variable containing the currently running vcpu. */
