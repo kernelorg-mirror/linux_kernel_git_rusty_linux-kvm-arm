@@ -99,6 +99,7 @@ enum cp15_regs {
 	c5_AIFSR,		/* Auxilary Instruction Fault Status Register */
 	c6_DFAR,		/* Data Fault Address Register */
 	c6_IFAR,		/* Instruction Fault Address Register */
+	c9_L2CTLR,		/* Cortex A15 L2 Control Register */
 	c10_PRRR,		/* Primary Region Remap Register */
 	c10_NMRR,		/* Normal Memory Remap Register */
 	c12_VBAR,		/* Vector Base Address Register */

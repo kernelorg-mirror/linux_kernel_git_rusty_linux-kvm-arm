@@ -128,17 +128,23 @@ static bool access_l2ctlr(struct kvm_vcpu *vcpu,
 			  const struct coproc_params *p,
 			  const struct coproc_reg *r)
 {
-	u32 l2ctlr, ncores;
-
 	if (p->is_write)
 		return ignore_write(vcpu, p, false);
+
+	*vcpu_reg(vcpu, p->Rt1) = vcpu->arch.cp15[c9_L2CTLR];
+	return true;
+}
+
+static void reset_l2ctlr(struct kvm_vcpu *vcpu, const struct coproc_reg *r)
+{
+	u32 l2ctlr, ncores;
 
 	asm volatile("mrc p15, 1, %0, c9, c0, 2\n" : "=r" (l2ctlr));
 	l2ctlr &= ~(3 << 24);
 	ncores = atomic_read(&vcpu->kvm->online_vcpus) - 1;
 	l2ctlr |= (ncores & 3) << 24;
-	*vcpu_reg(vcpu, p->Rt1) = l2ctlr;
-	return true;
+
+	vcpu->arch.cp15[c9_L2CTLR] = l2ctlr;
 }
 
 /* A15 TRM 4.3.49: R/O WI (even if NSACR.NS_L2ERR, a write of 1 is ignored). */
@@ -168,11 +174,18 @@ static bool access_actlr(struct kvm_vcpu *vcpu,
 			 const struct coproc_params *p,
 			 const struct coproc_reg *r)
 {
-	u32 actlr;
-
 	if (p->is_write)
 		return ignore_write(vcpu, p, false);
 
+	*vcpu_reg(vcpu, p->Rt1) = vcpu->arch.cp15[c1_ACTLR];
+	return true;
+}
+
+static void reset_actlr(struct kvm_vcpu *vcpu, const struct coproc_reg *r)
+{
+	u32 actlr;
+
+	/* ACTLR contains SMP bit: make sure you create all cpus first! */
 	asm volatile("mrc p15, 0, %0, c1, c0, 1\n" : "=r" (actlr));
 	/* Make the SMP bit consistent with the guest configuration */
 	if (atomic_read(&vcpu->kvm->online_vcpus) > 1)
@@ -180,8 +193,7 @@ static bool access_actlr(struct kvm_vcpu *vcpu,
 	else
 		actlr &= ~(1U << 6);
 
-	*vcpu_reg(vcpu, p->Rt1) = actlr;
-	return true;
+	vcpu->arch.cp15[c1_ACTLR] = actlr;
 }
 
 /* See note at ARM ARM B1.14.4 */
@@ -376,7 +388,8 @@ static const struct coproc_reg cp15_cortex_a15_regs[] = {
 	{ CRn( 1), CRm( 0), Op1( 0), Op2( 0), is32,
 			NULL, reset_val, c1_SCTLR, 0x00C50078 },
 	/* ACTLR: trapped by HCR.TAC bit. */
-	{ CRn( 1), CRm( 0), Op1( 0), Op2( 1), is32, access_actlr},
+	{ CRn( 1), CRm( 0), Op1( 0), Op2( 1), is32,
+			access_actlr, reset_actlr, c1_ACTLR },
 	/* CPACR: swapped by interrupt.S. */
 	{ CRn( 1), CRm( 0), Op1( 0), Op2( 2), is32,
 			NULL, reset_val, c1_CPACR, 0x00000000 },
@@ -384,7 +397,8 @@ static const struct coproc_reg cp15_cortex_a15_regs[] = {
 	/*
 	 * L2CTLR access (guest wants to know #CPUs).
 	 */
-	{ CRn( 9), CRm( 0), Op1( 1), Op2( 2), is32, access_l2ctlr},
+	{ CRn( 9), CRm( 0), Op1( 1), Op2( 2), is32,
+			access_l2ctlr, reset_l2ctlr, c9_L2CTLR },
 	{ CRn( 9), CRm( 0), Op1( 1), Op2( 3), is32, access_l2ectlr},
 
 	/* The Configuration Base Address Register. */
