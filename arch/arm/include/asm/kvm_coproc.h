@@ -32,4 +32,6 @@ int kvm_arm_set_msrs(struct kvm_vcpu *vcpu,
 		     struct kvm_msr_entry __user *entries, u32 num);
 unsigned long kvm_arm_num_guest_msrs(struct kvm_vcpu *vcpu);
 int kvm_copy_msrindices(struct kvm_vcpu *vcpu, u32 __user *uindices);
+
+void kvm_fixed_coproc_table_init(void);
 #endif /* __ARM_KVM_COPROC_H__ */
