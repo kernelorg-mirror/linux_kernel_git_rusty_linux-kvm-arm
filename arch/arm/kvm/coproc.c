@@ -39,6 +39,19 @@ struct coproc_params {
 	bool is_write;
 };
 
+struct coproc_reg {
+	unsigned long CRn;
+	unsigned long CRm;
+	unsigned long Op1;
+	unsigned long Op2;
+
+	bool is_64;
+
+	bool (*access)(struct kvm_vcpu *,
+		       const struct coproc_params *,
+		       const struct coproc_reg *);
+};
+
 static void print_cp_instr(const struct coproc_params *p)
 {
 	/* Look, we even formatted it for you to paste into the table! */
@@ -79,9 +92,9 @@ int kvm_handle_cp14_access(struct kvm_vcpu *vcpu, struct kvm_run *run)
 
 static bool ignore_write(struct kvm_vcpu *vcpu,
 			 const struct coproc_params *p,
-			 unsigned long arg)
+			 bool trace)
 {
-	if (arg)
+	if (trace)
 		trace_kvm_emulate_cp15_imp(p->Op1, p->Rt1, p->CRn, p->CRm,
 					   p->Op2, p->is_write);
 	return true;
@@ -89,9 +102,9 @@ static bool ignore_write(struct kvm_vcpu *vcpu,
 
 static bool read_zero(struct kvm_vcpu *vcpu,
 		      const struct coproc_params *p,
-		      unsigned long arg)
+		      bool trace)
 {
-	if (arg)
+	if (trace)
 		trace_kvm_emulate_cp15_imp(p->Op1, p->Rt1, p->CRn, p->CRm,
 					   p->Op2, p->is_write);
 	*vcpu_reg(vcpu, p->Rt1) = 0;
@@ -100,13 +113,13 @@ static bool read_zero(struct kvm_vcpu *vcpu,
 
 /* A15 TRM 4.3.48: R/O WI. */
 static bool access_l2ctlr(struct kvm_vcpu *vcpu,
-			const struct coproc_params *p,
-			unsigned long arg)
+			  const struct coproc_params *p,
+			  const struct coproc_reg *r)
 {
 	u32 l2ctlr, ncores;
 
 	if (p->is_write)
-		return ignore_write(vcpu, p, 0);
+		return ignore_write(vcpu, p, false);
 
 	asm volatile("mrc p15, 1, %0, c9, c0, 2\n" : "=r" (l2ctlr));
 	l2ctlr &= ~(3 << 24);
@@ -119,10 +132,10 @@ static bool access_l2ctlr(struct kvm_vcpu *vcpu,
 /* A15 TRM 4.3.49: R/O WI (even if NSACR.NS_L2ERR, a write of 1 is ignored). */
 static bool access_l2ectlr(struct kvm_vcpu *vcpu,
 			   const struct coproc_params *p,
-			   unsigned long arg)
+			   const struct coproc_reg *r)
 {
 	if (p->is_write)
-		return ignore_write(vcpu, p, 0);
+		return ignore_write(vcpu, p, false);
 
 	*vcpu_reg(vcpu, p->Rt1) = 0;
 	return true;
@@ -131,22 +144,22 @@ static bool access_l2ectlr(struct kvm_vcpu *vcpu,
 /* A15 TRM 4.3.60: R/O. */
 static bool access_cbar(struct kvm_vcpu *vcpu,
 			const struct coproc_params *p,
-			unsigned long arg)
+			const struct coproc_reg *r)
 {
 	if (p->is_write)
 		return false;
-	return read_zero(vcpu, p, 0);
+	return read_zero(vcpu, p, false);
 }
 
 /* A15 TRM 4.3.28: RO WI */
 static bool access_actlr(struct kvm_vcpu *vcpu,
 			 const struct coproc_params *p,
-			 unsigned long arg)
+			 const struct coproc_reg *r)
 {
 	u32 actlr;
 
 	if (p->is_write)
-		return ignore_write(vcpu, p, 0);
+		return ignore_write(vcpu, p, false);
 
 	asm volatile("mrc p15, 0, %0, c1, c0, 1\n" : "=r" (actlr));
 	/* Make the SMP bit consistent with the guest configuration */
@@ -162,7 +175,7 @@ static bool access_actlr(struct kvm_vcpu *vcpu,
 /* See note at ARM ARM B1.14.4 */
 static bool access_dcsw(struct kvm_vcpu *vcpu,
 			const struct coproc_params *p,
-			unsigned long arg)
+			const struct coproc_reg *r)
 {
 	u32 val;
 
@@ -199,12 +212,12 @@ static bool access_dcsw(struct kvm_vcpu *vcpu,
  */
 static bool pm_fake(struct kvm_vcpu *vcpu,
 		    const struct coproc_params *p,
-		    unsigned long arg)
+		    const struct coproc_reg *r)
 {
 	if (p->is_write)
-		return ignore_write(vcpu, p, arg);
+		return ignore_write(vcpu, p, false);
 	else
-		return read_zero(vcpu, p, arg);
+		return read_zero(vcpu, p, false);
 }
 
 #define access_pmcr pm_fake
@@ -220,20 +233,6 @@ static bool pm_fake(struct kvm_vcpu *vcpu,
 #define access_pmuserenr pm_fake
 #define access_pmintenset pm_fake
 #define access_pmintenclr pm_fake
-
-struct coproc_reg {
-	unsigned long CRn;
-	unsigned long CRm;
-	unsigned long Op1;
-	unsigned long Op2;
-
-	bool is_64;
-
-	bool (*access)(struct kvm_vcpu *,
-		       const struct coproc_params *,
-		       unsigned long);
-	unsigned long arg;
-};
 
 #define CRn(_x)		.CRn = _x
 #define CRm(_x) 	.CRm = _x
@@ -336,7 +335,7 @@ static int emulate_cp15(struct kvm_vcpu *vcpu,
 		r = find_reg(params, cp15_regs, ARRAY_SIZE(cp15_regs));
 
 	if (likely(r)) {
-		if (likely(r->access(vcpu, params, r->arg))) {
+		if (likely(r->access(vcpu, params, r))) {
 			/* Skip instruction, since it was emulated */
 			int instr_len = ((vcpu->arch.hsr >> 25) & 1) ? 4 : 2;
 			*vcpu_pc(vcpu) += instr_len;
