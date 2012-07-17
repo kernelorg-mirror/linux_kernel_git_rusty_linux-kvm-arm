@@ -358,11 +358,8 @@ static const struct coproc_emulate coproc_emulate[] = {
 	 * DC{C,I,CI}SW operations:
 	 */
 	{ CRn( 7), CRm( 6), Op1( 0), Op2( 2), is32,  WRITE, write_dcsw},
-	{ CRn( 7), CRm( 6), Op1( 0), Op2( 2), is32,  READ,  read_zero},
 	{ CRn( 7), CRm(10), Op1( 0), Op2( 2), is32,  WRITE, write_dcsw},
-	{ CRn( 7), CRm(10), Op1( 0), Op2( 2), is32,  READ,  read_zero},
 	{ CRn( 7), CRm(14), Op1( 0), Op2( 2), is32,  WRITE, write_dcsw},
-	{ CRn( 7), CRm(14), Op1( 0), Op2( 2), is32,  READ,  read_zero},
 	/*
 	 * L2CTLR access (guest wants to know #CPUs).
 	 *
