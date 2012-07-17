@@ -98,6 +98,7 @@ static bool read_zero(struct kvm_vcpu *vcpu,
 	return true;
 }
 
+/* A15 TRM 4.3.48: R/O WI. */
 static bool access_l2ctlr(struct kvm_vcpu *vcpu,
 			const struct coproc_params *p,
 			unsigned long arg)
@@ -115,6 +116,7 @@ static bool access_l2ctlr(struct kvm_vcpu *vcpu,
 	return true;
 }
 
+/* A15 TRM 4.3.49: R/O WI (even if NSACR.NS_L2ERR, a write of 1 is ignored). */
 static bool access_l2ectlr(struct kvm_vcpu *vcpu,
 			   const struct coproc_params *p,
 			   unsigned long arg)
@@ -126,6 +128,7 @@ static bool access_l2ectlr(struct kvm_vcpu *vcpu,
 	return true;
 }
 
+/* A15 TRM 4.3.60: R/O. */
 static bool access_cbar(struct kvm_vcpu *vcpu,
 			const struct coproc_params *p,
 			unsigned long arg)
@@ -135,6 +138,7 @@ static bool access_cbar(struct kvm_vcpu *vcpu,
 	return read_zero(vcpu, p, 0);
 }
 
+/* A15 TRM 4.3.28: RO WI */
 static bool access_actlr(struct kvm_vcpu *vcpu,
 			 const struct coproc_params *p,
 			 unsigned long arg)
@@ -155,6 +159,7 @@ static bool access_actlr(struct kvm_vcpu *vcpu,
 	return true;
 }
 
+/* See note at ARM ARM B1.14.4 */
 static bool access_dcsw(struct kvm_vcpu *vcpu,
 			const struct coproc_params *p,
 			unsigned long arg)
@@ -275,7 +280,7 @@ static const struct coproc_reg cp15_cortex_a15_regs[] = {
 	{ CRn( 9), CRm( 0), Op1( 1), Op2( 2), is32, access_l2ctlr},
 	{ CRn( 9), CRm( 0), Op1( 1), Op2( 3), is32, access_l2ectlr},
 
-	/* The Configuration Base Address Register (R/O). */
+	/* The Configuration Base Address Register. */
 	{ CRn(15), CRm( 0), Op1( 4), Op2( 0), is32, access_cbar},
 };
 
