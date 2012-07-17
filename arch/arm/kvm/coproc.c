@@ -107,17 +107,12 @@ static bool access_l2ctlr(struct kvm_vcpu *vcpu,
 	if (p->is_write)
 		return false;
 
-	switch (vcpu->arch.target) {
-	case KVM_ARM_TARGET_CORTEX_A15:
-		asm volatile("mrc p15, 1, %0, c9, c0, 2\n" : "=r" (l2ctlr));
-		l2ctlr &= ~(3 << 24);
-		ncores = atomic_read(&vcpu->kvm->online_vcpus) - 1;
-		l2ctlr |= (ncores & 3) << 24;
-		*vcpu_reg(vcpu, p->Rt1) = l2ctlr;
-		return true;
-	default:
-		return false;
-	}
+	asm volatile("mrc p15, 1, %0, c9, c0, 2\n" : "=r" (l2ctlr));
+	l2ctlr &= ~(3 << 24);
+	ncores = atomic_read(&vcpu->kvm->online_vcpus) - 1;
+	l2ctlr |= (ncores & 3) << 24;
+	*vcpu_reg(vcpu, p->Rt1) = l2ctlr;
+	return true;
 }
 
 static bool access_l2ectlr(struct kvm_vcpu *vcpu,
@@ -127,13 +122,8 @@ static bool access_l2ectlr(struct kvm_vcpu *vcpu,
 	if (p->is_write)
 		return false;
 
-	switch (vcpu->arch.target) {
-	case KVM_ARM_TARGET_CORTEX_A15:
-		*vcpu_reg(vcpu, p->Rt1) = 0;
-		return true;
-	default:
-		return false;
-	}
+	*vcpu_reg(vcpu, p->Rt1) = 0;
+	return true;
 }
 
 static bool access_cbar(struct kvm_vcpu *vcpu,
@@ -154,22 +144,14 @@ static bool access_actlr(struct kvm_vcpu *vcpu,
 	if (p->is_write)
 		return ignore_write(vcpu, p, 0);
 
-	switch (vcpu->arch.target) {
-	case KVM_ARM_TARGET_CORTEX_A15:
-		asm volatile("mrc p15, 0, %0, c1, c0, 1\n" : "=r" (actlr));
-		/* Make the SMP bit consistent with the guest configuration */
-		if (atomic_read(&vcpu->kvm->online_vcpus) > 1)
-			actlr |= 1U << 6;
-		else
-			actlr &= ~(1U << 6);
-		*vcpu_reg(vcpu, p->Rt1) = actlr;
-		break;
-	default:
-		asm volatile("mrc p15, 0, %0, c1, c0, 1\n" : "=r" (actlr));
-		*vcpu_reg(vcpu, p->Rt1) = actlr;
-		break;
-	}
+	asm volatile("mrc p15, 0, %0, c1, c0, 1\n" : "=r" (actlr));
+	/* Make the SMP bit consistent with the guest configuration */
+	if (atomic_read(&vcpu->kvm->online_vcpus) > 1)
+		actlr |= 1U << 6;
+	else
+		actlr &= ~(1U << 6);
 
+	*vcpu_reg(vcpu, p->Rt1) = actlr;
 	return true;
 }
 
@@ -255,24 +237,14 @@ struct coproc_reg {
 #define is64		.is_64 = true
 #define is32		.is_64 = false
 
+/* Architected CP15 registers. */
 static const struct coproc_reg cp15_regs[] = {
-	/*
-	 * ACTRL access:
-	 *
-	 * Ignore writes, and read returns the host settings.
-	 */
-	{ CRn( 1), CRm( 0), Op1( 0), Op2( 1), is32, access_actlr},
 	/*
 	 * DC{C,I,CI}SW operations:
 	 */
 	{ CRn( 7), CRm( 6), Op1( 0), Op2( 2), is32, access_dcsw},
 	{ CRn( 7), CRm(10), Op1( 0), Op2( 2), is32, access_dcsw},
 	{ CRn( 7), CRm(14), Op1( 0), Op2( 2), is32, access_dcsw},
-	/*
-	 * L2CTLR access (guest wants to know #CPUs).
-	 */
-	{ CRn( 9), CRm( 0), Op1( 1), Op2( 2), is32, access_l2ctlr},
-	{ CRn( 9), CRm( 0), Op1( 1), Op2( 3), is32, access_l2ectlr},
 	/*
 	 * Dummy performance monitor implementation.
 	 */
@@ -289,18 +261,45 @@ static const struct coproc_reg cp15_regs[] = {
 	{ CRn( 9), CRm(14), Op1( 0), Op2( 0), is32, access_pmuserenr},
 	{ CRn( 9), CRm(14), Op1( 0), Op2( 1), is32, access_pmintenset},
 	{ CRn( 9), CRm(14), Op1( 0), Op2( 2), is32, access_pmintenclr},
+};
+
+/* A15-specific CP15 registers. */
+static const struct coproc_reg cp15_cortex_a15_regs[] = {
+	/*
+	 * ACTRL access:
+	 */
+	{ CRn( 1), CRm( 0), Op1( 0), Op2( 1), is32, access_actlr},
+	/*
+	 * L2CTLR access (guest wants to know #CPUs).
+	 */
+	{ CRn( 9), CRm( 0), Op1( 1), Op2( 2), is32, access_l2ctlr},
+	{ CRn( 9), CRm( 0), Op1( 1), Op2( 3), is32, access_l2ectlr},
 
 	/* The Configuration Base Address Register (R/O). */
 	{ CRn(15), CRm( 0), Op1( 4), Op2( 0), is32, access_cbar},
 };
 
-static int emulate_cp15(struct kvm_vcpu *vcpu,
-			const struct coproc_params *params)
+/* Get specific register table for this target. */
+static const struct coproc_reg *get_target_table(unsigned target, size_t *num)
 {
-	unsigned long instr_len, i;
+	switch (target) {
+	case KVM_ARM_TARGET_CORTEX_A15:
+		*num = ARRAY_SIZE(cp15_cortex_a15_regs);
+		return cp15_cortex_a15_regs;
+	default:
+		*num = 0;
+		return NULL;
+	}
+}
 
-	for (i = 0; i < ARRAY_SIZE(cp15_regs); i++) {
-		const struct coproc_reg *r = &cp15_regs[i];
+static const struct coproc_reg *find_reg(const struct coproc_params *params,
+					 const struct coproc_reg table[],
+					 unsigned int num)
+{
+	unsigned int i;
+
+	for (i = 0; i < num; i++) {
+		const struct coproc_reg *r = &table[i];
 
 		if (params->is_64bit != r->is_64)
 			continue;
@@ -313,21 +312,38 @@ static int emulate_cp15(struct kvm_vcpu *vcpu,
 		if (params->Op2 != r->Op2)
 			continue;
 
-		/* If function fails, it should complain. */
-		if (!r->access(vcpu, params, r->arg))
-			goto undef;
-
-		/* Skip instruction, since it was emulated */
-		instr_len = ((vcpu->arch.hsr >> 25) & 1) ? 4 : 2;
-		*vcpu_pc(vcpu) += instr_len;
-		kvm_adjust_itstate(vcpu);
-		return 0;
+		return r;
 	}
+	return NULL;
+}
 
-	kvm_err("Unsupported guest CP15 access at: %08x\n",
-		vcpu->arch.regs.pc);
-	print_cp_instr(params);
-undef:
+static int emulate_cp15(struct kvm_vcpu *vcpu,
+			const struct coproc_params *params)
+{
+	size_t num;
+	const struct coproc_reg *table, *r;
+
+	table = get_target_table(vcpu->arch.target, &num);
+
+	/* Search target-specific then generic table. */
+	r = find_reg(params, table, num);
+	if (!r)
+		r = find_reg(params, cp15_regs, ARRAY_SIZE(cp15_regs));
+
+	if (likely(r)) {
+		if (likely(r->access(vcpu, params, r->arg))) {
+			/* Skip instruction, since it was emulated */
+			int instr_len = ((vcpu->arch.hsr >> 25) & 1) ? 4 : 2;
+			*vcpu_pc(vcpu) += instr_len;
+			kvm_adjust_itstate(vcpu);
+			return 0;
+		}
+		/* If access function fails, it should complain. */
+	} else {
+		kvm_err("Unsupported guest CP15 access at: %08x\n",
+			vcpu->arch.regs.pc);
+		print_cp_instr(params);
+	}
 	kvm_inject_undefined(vcpu);
 	return 0;
 }
