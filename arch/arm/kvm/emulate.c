@@ -319,17 +319,6 @@ static bool write_dcsw(struct kvm_vcpu *vcpu,
 	return true;
 }
 
-static bool access_cp15_reg(struct kvm_vcpu *vcpu,
-			    const struct coproc_params *p,
-			    unsigned long cp15_reg)
-{
-	if (p->is_write)
-		vcpu->arch.cp15[cp15_reg] = *vcpu_reg(vcpu, p->Rt1);
-	else
-		*vcpu_reg(vcpu, p->Rt1) = vcpu->arch.cp15[cp15_reg];
-	return true;
-}
-
 /* Any field which is 0xFFFFFFFF == DF */
 struct coproc_emulate {
 	unsigned long CRn;
@@ -384,21 +373,6 @@ static const struct coproc_emulate coproc_emulate[] = {
 	{ CRn( 9), CRm( 0), Op1( 1), Op2( 3), is32,  READ,  access_l2ectlr},
 	{ CRn( 9), CRm(DF), Op1(DF), Op2(DF), is32,  WRITE, ignore_write},
 	{ CRn( 9), CRm(DF), Op1(DF), Op2(DF), is32,  READ,  read_zero},
-
-	/*
-	 * These CRn == 10 entries may not need to exist - if we can
-	 * ignore guest attempts to tamper with TLB lockdowns then it
-	 * should be enough to store/restore the host/guest PRRR and
-	 * NMRR memory remap registers and allow guest direct access
-	 * to these registers.
-	 *
-	 * TLB Lockdown operations - ignored
-	 */
-	{ CRn(10), CRm( 0), Op1(DF), Op2(DF), is32,  WRITE, ignore_write},
-	{ CRn(10), CRm( 2), Op1( 0), Op2( 0), is32,  RW,    access_cp15_reg,
-							    c10_PRRR},
-	{ CRn(10), CRm( 2), Op1( 0), Op2( 1), is32,  RW,    access_cp15_reg,
-							    c10_NMRR},
 
 	/*
 	 * The CP15 c15 register is architecturally implementation
