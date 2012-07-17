@@ -57,15 +57,6 @@ struct kvm_regs {
 	__u32 reg15;
 	__u32 cpsr;
 	__u32 spsr[5];		/* Banked SPSR,  indexed by MODE_  */
-	struct {
-		__u32 c0_midr;
-		__u32 c1_sys;
-		__u32 c2_base0;
-		__u32 c2_base1;
-		__u32 c2_control;
-		__u32 c3_dacr;
-	} cp15;
-
 };
 
 /* Supported Processor Types */
