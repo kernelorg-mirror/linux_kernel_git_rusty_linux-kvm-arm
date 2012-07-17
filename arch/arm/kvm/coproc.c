@@ -16,6 +16,7 @@
  * Foundation, 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 #include <linux/mm.h>
+#include <linux/uaccess.h>
 #include <asm/kvm_arm.h>
 #include <asm/kvm_host.h>
 #include <asm/kvm_emulate.h>
@@ -554,4 +555,240 @@ int kvm_handle_cp15_32(struct kvm_vcpu *vcpu, struct kvm_run *run)
 	params.Rt2 = 0;
 
 	return emulate_cp15(vcpu, &params);
+}
+
+/******************************************************************************
+ * Userspace API
+ *****************************************************************************/
+
+/* Given a simple mask, get those bits. */
+static inline u32 get_bits(u32 index, u32 mask)
+{
+	return (index & mask) >> (ffs(mask)-1);
+}
+
+static void index_to_params(u32 index, struct coproc_params *params)
+{
+	if (get_bits(index, KVM_ARM_MSR_64_BIT_MASK)) {
+		params->is_64bit = true;
+		params->CRm = get_bits(index, KVM_ARM_MSR_64_CRM_MASK);
+		params->Op1 = get_bits(index, KVM_ARM_MSR_64_OPC1_MASK);
+		params->Op2 = 0;
+		params->CRn = 0;
+	} else {
+		params->is_64bit = false;
+		params->CRn = get_bits(index, KVM_ARM_MSR_32_CRN_MASK);
+		params->CRm = get_bits(index, KVM_ARM_MSR_32_CRM_MASK);
+		params->Op1 = get_bits(index, KVM_ARM_MSR_32_OPC1_MASK);
+		params->Op2 = get_bits(index, KVM_ARM_MSR_32_OPC2_MASK);
+	}
+}
+
+/* Decode an index value, and find the cp15 coproc_reg entry. */
+static const struct coproc_reg *index_to_cp15(struct kvm_vcpu *vcpu, u32 index)
+{
+	size_t num;
+	const struct coproc_reg *table, *r;
+	struct coproc_params params;
+
+	index_to_params(index, &params);
+
+	table = get_target_table(vcpu->arch.target, &num);
+	r = find_reg(&params, table, num);
+	if (!r)
+		r = find_reg(&params, cp15_regs, ARRAY_SIZE(cp15_regs));
+
+	/* Not saved in the cp15 array? */
+	if (r && !r->reg)
+		r = NULL;
+
+	return r;
+}
+
+static int get_msr(struct kvm_vcpu *vcpu, u32 index, u64 *val)
+{
+	const struct coproc_reg *r;
+	u32 coproc = get_bits(index, KVM_ARM_MSR_COPROC_MASK);
+
+	/* We only do cp15 for now. */
+	if (coproc != 15)
+		return -EINVAL;
+
+	r = index_to_cp15(vcpu, index);
+	if (!r)
+		return -ENOENT;
+
+	*val = vcpu->arch.cp15[r->reg];
+	if (r->is_64)
+		*val |= ((u64)vcpu->arch.cp15[r->reg+1]) << 32;
+	return 0;
+}
+
+static int set_msr(struct kvm_vcpu *vcpu, u32 index, u64 val)
+{
+	const struct coproc_reg *r;
+	u32 coproc = get_bits(index, KVM_ARM_MSR_COPROC_MASK);
+
+	/* We only do cp15 for now. */
+	if (coproc != 15)
+		return -EINVAL;
+
+	r = index_to_cp15(vcpu, index);
+	if (!r)
+		return -ENOENT;
+
+	vcpu->arch.cp15[r->reg] = val;
+	if (r->is_64)
+		vcpu->arch.cp15[r->reg+1] = (val >> 32);
+	return 0;
+}
+
+/* Return user adddress to get/set value from. */
+static u64 __user *get_umsr(struct kvm_msr_entry __user *uentry, u32 *idx)
+{
+	struct kvm_msr_entry entry;
+
+	if (copy_from_user(&entry, uentry, sizeof(entry)))
+		return NULL;
+	*idx = entry.index;
+	return &uentry->data;
+}
+
+/**
+ * kvm_arm_get_msrs - copy one or more special registers to userspace.
+ * @vcpu: the vcpu
+ * @entries: the array of entries
+ * @num: the number of entries
+ */
+int kvm_arm_get_msrs(struct kvm_vcpu *vcpu,
+		     struct kvm_msr_entry __user *entries, u32 num)
+{
+	u32 i, index;
+	u64 val;
+	u64 __user *uval;
+	int ret;
+
+	for (i = 0; i < num; i++) {
+		uval = get_umsr(&entries[i], &index);
+		if (!uval)
+			return -EFAULT;
+		if ((ret = get_msr(vcpu, index, &val)) != 0)
+			return ret;
+		if (put_user(val, uval))
+			return -EFAULT;
+	}
+	return 0;
+}
+
+/**
+ * kvm_arm_set_msrs - copy one or more special registers from userspace.
+ * @vcpu: the vcpu
+ * @entries: the array of entries
+ * @num: the number of entries
+ */
+int kvm_arm_set_msrs(struct kvm_vcpu *vcpu,
+		     struct kvm_msr_entry __user *entries, u32 num)
+{
+	u32 i, index;
+	u64 val;
+	u64 __user *uval;
+	int ret;
+
+	for (i = 0; i < num; i++) {
+		uval = get_umsr(&entries[i], &index);
+		if (!uval)
+			return -EFAULT;
+		if (copy_from_user(&val, uval, sizeof(val)) != 0)
+			return -EFAULT;
+		if ((ret = set_msr(vcpu, index, val)) != 0)
+			return ret;
+	}
+	return 0;
+}
+
+/**
+ * kvm_arm_num_guest_msrs - how many registers do we present via KVM_GET_MSR
+ *
+ * This is for special registers, particularly cp15.
+ */
+unsigned long kvm_arm_num_guest_msrs(struct kvm_vcpu *vcpu)
+{
+	const struct coproc_reg *table;
+	unsigned int i, total = 0;
+	size_t num;
+
+	/* Count registers in arch-specific table. */
+	table = get_target_table(vcpu->arch.target, &num);
+	for (i = 0; i < num; i++) {
+		if (table[i].reg)
+			total++;
+	}
+
+	/* FIXME: Assumes no duplicates! */
+	table = cp15_regs;
+	num = ARRAY_SIZE(cp15_regs);
+	for (i = 0; i < num; i++) {
+		if (table[i].reg)
+			total++;
+	}
+
+	return total;
+}
+
+/* Puts in the position indicated by mask (assumes val fits in mask) */
+static inline u32 set_bits(u32 val, u32 mask)
+{
+	return val << (ffs(mask)-1);
+}
+
+static u32 cp15_to_index(const struct coproc_reg *reg)
+{
+	u32 val = set_bits(15, KVM_ARM_MSR_COPROC_MASK);
+	if (reg->is_64) {
+		val |= set_bits(1, KVM_ARM_MSR_64_BIT_MASK);
+		val |= set_bits(reg->Op1, KVM_ARM_MSR_64_OPC1_MASK);
+		val |= set_bits(reg->CRm, KVM_ARM_MSR_64_CRM_MASK);
+	} else {
+		val |= set_bits(reg->Op1, KVM_ARM_MSR_32_OPC1_MASK);
+		val |= set_bits(reg->Op2, KVM_ARM_MSR_32_OPC2_MASK);
+		val |= set_bits(reg->CRm, KVM_ARM_MSR_32_CRM_MASK);
+		val |= set_bits(reg->CRn, KVM_ARM_MSR_32_CRN_MASK);
+	}
+	return val;
+}
+
+/**
+ * kvm_arm_msridx - what's the index value for the nth register.
+ *
+ * This is for special registers, particularly cp15.
+ */
+int kvm_copy_msrindices(struct kvm_vcpu *vcpu, u32 __user *uindices)
+{
+	const struct coproc_reg *table;
+	unsigned int i;
+	size_t num;
+
+	/* First give the target-specific registers' indices. */
+	table = get_target_table(vcpu->arch.target, &num);
+	for (i = 0; i < num; i++) {
+		/* Ingore registers we trap but don't save. */
+		if (!table[i].reg)
+			continue;
+		if (put_user(cp15_to_index(&table[i]), uindices))
+			return -EFAULT;
+		uindices++;
+	}
+
+	/* Finally give the architected registers' indices. */
+	table = cp15_regs;
+	num = ARRAY_SIZE(cp15_regs);
+	for (i = 0; i < num; i++) {
+		/* Ingore registers we trap but don't save. */
+		if (!table[i].reg)
+			continue;
+		if (put_user(cp15_to_index(&table[i]), uindices))
+			return -EFAULT;
+		uindices++;
+	}
+	return 0;
 }
