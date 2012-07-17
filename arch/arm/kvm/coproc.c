@@ -105,7 +105,7 @@ static bool access_l2ctlr(struct kvm_vcpu *vcpu,
 	u32 l2ctlr, ncores;
 
 	if (p->is_write)
-		return false;
+		return ignore_write(vcpu, p, 0);
 
 	asm volatile("mrc p15, 1, %0, c9, c0, 2\n" : "=r" (l2ctlr));
 	l2ctlr &= ~(3 << 24);
@@ -120,7 +120,7 @@ static bool access_l2ectlr(struct kvm_vcpu *vcpu,
 			   unsigned long arg)
 {
 	if (p->is_write)
-		return false;
+		return ignore_write(vcpu, p, 0);
 
 	*vcpu_reg(vcpu, p->Rt1) = 0;
 	return true;
