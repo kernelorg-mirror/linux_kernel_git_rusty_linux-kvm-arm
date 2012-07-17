@@ -371,14 +371,8 @@ static const struct coproc_emulate coproc_emulate[] = {
 	{ CRn( 9), CRm(DF), Op1(DF), Op2(DF), is32,  WRITE, ignore_write},
 	{ CRn( 9), CRm(DF), Op1(DF), Op2(DF), is32,  READ,  read_zero},
 
-	/*
-	 * The CP15 c15 register is architecturally implementation
-	 * defined, but some guest kernels attempt to read/write a
-	 * diagnostics register here. We always return 0 and ignore
-	 * writes and hope for the best.
-	 */
-	{ CRn(15), CRm(DF), Op1(DF), Op2(DF), is32,  WRITE, ignore_write, 1},
-	{ CRn(15), CRm(DF), Op1(DF), Op2(DF), is32,  READ,  read_zero,    1},
+	/* The Configuration Base Address Register (R/O). */
+	{ CRn(15), CRm( 0), Op1( 4), Op2( 0), is32,  READ, read_zero, 1},
 };
 
 #undef is64
