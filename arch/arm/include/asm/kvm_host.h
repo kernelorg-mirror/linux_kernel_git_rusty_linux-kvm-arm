@@ -38,6 +38,7 @@ struct kvm_vcpu;
 u32 *kvm_vcpu_reg(struct kvm_vcpu *vcpu, u8 reg_num, u32 mode);
 int kvm_target_cpu(void);
 int kvm_reset_vcpu(struct kvm_vcpu *vcpu);
+void kvm_reset_coprocs(struct kvm_vcpu *vcpu);
 
 struct kvm_arch {
 	/* The VMID generation used for the virt. memory system */
@@ -79,8 +80,9 @@ struct kvm_vcpu_regs {
 	u32 cpsr;		/* The guest CPSR */
 } __packed;
 
+/* 0 is reserved as an invalid value. */
 enum cp15_regs {
-	c0_MIDR,		/* Main ID Register */
+	c0_MIDR=1,		/* Main ID Register */
 	c0_MPIDR,		/* MultiProcessor ID Register */
 	c1_SCTLR,		/* System Control Register */
 	c1_ACTLR,		/* Auxilliary Control Register */

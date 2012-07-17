@@ -20,6 +20,7 @@
 #include <asm/kvm_host.h>
 #include <asm/kvm_emulate.h>
 #include <asm/kvm_coproc.h>
+#include <asm/cputype.h>
 #include <trace/events/kvm.h>
 
 #include "trace.h"
@@ -40,6 +41,7 @@ struct coproc_params {
 };
 
 struct coproc_reg {
+	/* MRC/MCR/MRRC/MCRR instruction which accesses it. */
 	unsigned long CRn;
 	unsigned long CRm;
 	unsigned long Op1;
@@ -47,9 +49,19 @@ struct coproc_reg {
 
 	bool is_64;
 
+	/* Trapped access from guest, if non-NULL. */
 	bool (*access)(struct kvm_vcpu *,
 		       const struct coproc_params *,
 		       const struct coproc_reg *);
+
+	/* Initialization for vcpu. */
+	void (*reset)(struct kvm_vcpu *, const struct coproc_reg *);
+
+	/* Offset of register in vcpu->arch.cp15[], or 0. */
+	enum cp15_regs reg;
+
+	/* Value (usually reset value) */
+	u64 val;
 };
 
 static void print_cp_instr(const struct coproc_params *p)
@@ -234,6 +246,43 @@ static bool pm_fake(struct kvm_vcpu *vcpu,
 #define access_pmintenset pm_fake
 #define access_pmintenclr pm_fake
 
+/* Reset functions */
+static void reset_unknown(struct kvm_vcpu *vcpu, const struct coproc_reg *r)
+{
+	BUG_ON(!r->reg);
+	BUG_ON(r->reg >= ARRAY_SIZE(vcpu->arch.cp15));
+	vcpu->arch.cp15[r->reg] = 0xdecafbad;
+}
+
+static void reset_val(struct kvm_vcpu *vcpu, const struct coproc_reg *r)
+{
+	BUG_ON(!r->reg);
+	BUG_ON(r->reg >= ARRAY_SIZE(vcpu->arch.cp15));
+	vcpu->arch.cp15[r->reg] = r->val;
+}
+
+static void reset_unknown64(struct kvm_vcpu *vcpu, const struct coproc_reg *r)
+{
+	BUG_ON(!r->reg);
+	BUG_ON(r->reg + 1 >= ARRAY_SIZE(vcpu->arch.cp15));
+
+	vcpu->arch.cp15[r->reg] = 0xdecafbad;
+	vcpu->arch.cp15[r->reg+1] = 0xd0c0ffee;
+}
+
+static void reset_mpidr(struct kvm_vcpu *vcpu, const struct coproc_reg *r)
+{
+	/*
+	 * Compute guest MPIDR:
+	 * (Even if we present only one VCPU to the guest on an SMP
+	 * host we don't set the U bit in the MPIDR, or vice versa, as
+	 * revealing the underlying hardware properties is likely to
+	 * be the best choice).
+	 */
+	vcpu->arch.cp15[c0_MPIDR] = (read_cpuid_mpidr() & ~MPIDR_CPUID)
+		| (vcpu->vcpu_id & MPIDR_CPUID);
+}
+
 #define CRn(_x)		.CRn = _x
 #define CRm(_x) 	.CRm = _x
 #define Op1(_x) 	.Op1 = _x
@@ -243,6 +292,33 @@ static bool pm_fake(struct kvm_vcpu *vcpu,
 
 /* Architected CP15 registers. */
 static const struct coproc_reg cp15_regs[] = {
+	/* TTBCR: swapped by interrupt.S. */
+	{ CRn( 2), CRm( 0), Op1( 0), Op2( 0), is32,
+			NULL, reset_val, c2_TTBCR, 0x00000000 },
+
+	/* TTBR0/TTBR1: swapped by interrupt.S. */
+	{ CRm( 2), Op1( 0), is64, NULL, reset_unknown64, c2_TTBR0 },
+	{ CRm( 2), Op1( 1), is64, NULL, reset_unknown64, c2_TTBR1 },
+
+	/* DACR: swapped by interrupt.S. */
+	{ CRn( 3), CRm( 0), Op1( 0), Op2( 0), is32,
+			NULL, reset_unknown, c3_DACR },
+
+	/* DFSR/IFSR/ADFSR/AIFSR: swapped by interrupt.S. */
+	{ CRn( 5), CRm( 0), Op1( 0), Op2( 0), is32,
+			NULL, reset_unknown, c5_DFSR },
+	{ CRn( 5), CRm( 0), Op1( 0), Op2( 1), is32,
+			NULL, reset_unknown, c5_IFSR },
+	{ CRn( 5), CRm( 1), Op1( 0), Op2( 0), is32,
+			NULL, reset_unknown, c5_ADFSR },
+	{ CRn( 5), CRm( 1), Op1( 0), Op2( 1), is32,
+			NULL, reset_unknown, c5_AIFSR },
+
+	/* DFAR/IFAR: swapped by interrupt.S. */
+	{ CRn( 6), CRm( 0), Op1( 0), Op2( 0), is32,
+			NULL, reset_unknown, c6_DFAR },
+	{ CRn( 6), CRm( 0), Op1( 0), Op2( 2), is32,
+			NULL, reset_unknown, c6_IFAR },
 	/*
 	 * DC{C,I,CI}SW operations:
 	 */
@@ -265,14 +341,46 @@ static const struct coproc_reg cp15_regs[] = {
 	{ CRn( 9), CRm(14), Op1( 0), Op2( 0), is32, access_pmuserenr},
 	{ CRn( 9), CRm(14), Op1( 0), Op2( 1), is32, access_pmintenset},
 	{ CRn( 9), CRm(14), Op1( 0), Op2( 2), is32, access_pmintenclr},
+ 
+	/* PRRR/NMRR (aka MAIR0/MAIR1): swapped by interrupt.S. */
+	{ CRn(10), CRm( 2), Op1( 0), Op2( 0), is32,
+			NULL, reset_unknown, c10_PRRR},
+	{ CRn(10), CRm( 2), Op1( 0), Op2( 1), is32,
+			NULL, reset_unknown, c10_NMRR},
+
+	/* VBAR: swapped by interrupt.S. */
+	{ CRn(12), CRm( 0), Op1( 0), Op2( 0), is32,
+			NULL, reset_val, c12_VBAR, 0x00000000 },
+
+	/* CONTEXTIDR/TPIDRURW/TPIDRURO/TPIDRPRW: swapped by interrupt.S. */
+	{ CRn(13), CRm( 0), Op1( 0), Op2( 1), is32,
+			NULL, reset_val, c13_CID, 0x00000000 },
+	{ CRn(13), CRm( 0), Op1( 0), Op2( 2), is32,
+			NULL, reset_unknown, c13_TID_URW },
+	{ CRn(13), CRm( 0), Op1( 0), Op2( 3), is32,
+			NULL, reset_unknown, c13_TID_URO },
+	{ CRn(13), CRm( 0), Op1( 0), Op2( 4), is32,
+			NULL, reset_unknown, c13_TID_PRIV },
 };
 
 /* A15-specific CP15 registers. */
 static const struct coproc_reg cp15_cortex_a15_regs[] = {
-	/*
-	 * ACTRL access:
-	 */
+	/* MIDR: we use VPIDR for guest access. */
+	{ CRn( 0), CRm( 0), Op1( 0), Op2( 0), is32,
+			NULL, reset_val, c0_MIDR, 0x412FC0F0 },
+	/* MPIDR: we use VMPIDR for guest access. */
+	{ CRn( 0), CRm( 0), Op1( 0), Op2( 0), is32,
+			NULL, reset_mpidr, c0_MPIDR },
+
+	/* SCTLR: swapped by interrupt.S. */
+	{ CRn( 1), CRm( 0), Op1( 0), Op2( 0), is32,
+			NULL, reset_val, c1_SCTLR, 0x00C50078 },
+	/* ACTLR: trapped by HCR.TAC bit. */
 	{ CRn( 1), CRm( 0), Op1( 0), Op2( 1), is32, access_actlr},
+	/* CPACR: swapped by interrupt.S. */
+	{ CRn( 1), CRm( 0), Op1( 0), Op2( 2), is32,
+			NULL, reset_val, c1_CPACR, 0x00000000 },
+
 	/*
 	 * L2CTLR access (guest wants to know #CPUs).
 	 */
@@ -335,6 +443,9 @@ static int emulate_cp15(struct kvm_vcpu *vcpu,
 		r = find_reg(params, cp15_regs, ARRAY_SIZE(cp15_regs));
 
 	if (likely(r)) {
+		/* If we don't have an accessor, we should never get here! */
+		BUG_ON(!r->access);
+
 		if (likely(r->access(vcpu, params, r))) {
 			/* Skip instruction, since it was emulated */
 			int instr_len = ((vcpu->arch.hsr >> 25) & 1) ? 4 : 2;
@@ -374,6 +485,41 @@ int kvm_handle_cp15_64(struct kvm_vcpu *vcpu, struct kvm_run *run)
 	return emulate_cp15(vcpu, &params);
 }
 
+static void reset_table(struct kvm_vcpu *vcpu,
+			const struct coproc_reg *table, size_t num)
+{
+	unsigned long i;
+
+	for (i = 0; i < num; i++)
+		if (table[i].reset)
+			table[i].reset(vcpu, &table[i]);
+}
+
+/**
+ * kvm_reset_coprocs - sets cp15 registers to reset value
+ * @vcpu: The VCPU pointer
+ *
+ * This function finds the right table above and sets the registers on the
+ * virtual CPU struct to their architectually defined reset values.
+ */
+void kvm_reset_coprocs(struct kvm_vcpu *vcpu)
+{
+	size_t num;
+	const struct coproc_reg *table;
+
+	/* Catch someone adding a register without putting in reset entry. */
+	memset(vcpu->arch.cp15, 0x42, sizeof(vcpu->arch.cp15));
+
+	/* Generic chip reset first (so target could override). */
+	reset_table(vcpu, cp15_regs, ARRAY_SIZE(cp15_regs));
+
+	table = get_target_table(vcpu->arch.target, &num);
+	reset_table(vcpu, table, num);
+
+	for (num = 1; num < nr_cp15_regs; num++)
+		if (vcpu->arch.cp15[num] == 0x42424242)
+			panic("Didn't reset vcpu->arch.cp15[%zi]", num);
+}
 /**
  * kvm_handle_cp15_32 -- handles a mrc/mcr trap on a guest CP15 access
  * @vcpu: The VCPU pointer
