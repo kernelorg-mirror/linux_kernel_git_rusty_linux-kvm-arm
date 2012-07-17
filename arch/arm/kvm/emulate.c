@@ -319,6 +319,39 @@ static bool write_dcsw(struct kvm_vcpu *vcpu,
 	return true;
 }
 
+/*
+ * We could trap ID_DFR0 and tell the guest we don't support performance
+ * monitoring.  Unfortunately the patch to make the kernel check ID_DFR0 was
+ * NAKed, so it will read the PMCR anyway.
+ *
+ * Therefore we tell the guest we have 0 counters.  Unfortunately, we
+ * must always support PMCCNTR (the cycle counter): we just RAZ/WI for
+ * all PM registers, which doesn't crash the guest kernel at least.
+ */
+static bool pm_fake(struct kvm_vcpu *vcpu,
+		    const struct coproc_params *p,
+		    unsigned long arg)
+{
+	if (p->is_write)
+		return ignore_write(vcpu, p, arg);
+	else
+		return read_zero(vcpu, p, arg);
+}
+
+#define access_pmcr pm_fake
+#define access_pmcntenset pm_fake
+#define access_pmcntenclr pm_fake
+#define access_pmovsr pm_fake
+#define access_pmselr pm_fake
+#define access_pmceid0 pm_fake
+#define access_pmceid1 pm_fake
+#define access_pmccntr pm_fake
+#define access_pmxevtyper pm_fake
+#define access_pmxevcntr pm_fake
+#define access_pmuserenr pm_fake
+#define access_pmintenset pm_fake
+#define access_pmintenclr pm_fake
+
 /* Any field which is 0xFFFFFFFF == DF */
 struct coproc_emulate {
 	unsigned long CRn;
@@ -362,14 +395,27 @@ static const struct coproc_emulate coproc_emulate[] = {
 	{ CRn( 7), CRm(14), Op1( 0), Op2( 2), is32,  WRITE, write_dcsw},
 	/*
 	 * L2CTLR access (guest wants to know #CPUs).
-	 *
-	 * FIXME: Hack Alert: Read zero as default case.
 	 */
 	{ CRn( 9), CRm( 0), Op1( 1), Op2( 2), is32,  READ,  read_l2ctlr},
 	{ CRn( 9), CRm( 0), Op1( 1), Op2( 2), is32,  WRITE, write_l2ctlr},
 	{ CRn( 9), CRm( 0), Op1( 1), Op2( 3), is32,  READ,  access_l2ectlr},
-	{ CRn( 9), CRm(DF), Op1(DF), Op2(DF), is32,  WRITE, ignore_write},
-	{ CRn( 9), CRm(DF), Op1(DF), Op2(DF), is32,  READ,  read_zero},
+
+	/*
+	 * Dummy performance monitor implementation.
+	 */
+	{ CRn( 9), CRm(12), Op1( 0), Op2( 0), is32,  RW, access_pmcr},
+	{ CRn( 9), CRm(12), Op1( 0), Op2( 1), is32,  RW, access_pmcntenset},
+	{ CRn( 9), CRm(12), Op1( 0), Op2( 2), is32,  RW, access_pmcntenclr},
+	{ CRn( 9), CRm(12), Op1( 0), Op2( 3), is32,  RW, access_pmovsr},
+	{ CRn( 9), CRm(12), Op1( 0), Op2( 5), is32,  RW, access_pmselr},
+	{ CRn( 9), CRm(12), Op1( 0), Op2( 6), is32,  RW, access_pmceid0},
+	{ CRn( 9), CRm(12), Op1( 0), Op2( 7), is32,  RW, access_pmceid1},
+	{ CRn( 9), CRm(13), Op1( 0), Op2( 0), is32,  RW, access_pmccntr},
+	{ CRn( 9), CRm(13), Op1( 0), Op2( 1), is32,  RW, access_pmxevtyper},
+	{ CRn( 9), CRm(13), Op1( 0), Op2( 2), is32,  RW, access_pmxevcntr},
+	{ CRn( 9), CRm(14), Op1( 0), Op2( 0), is32,  RW, access_pmuserenr},
+	{ CRn( 9), CRm(14), Op1( 0), Op2( 1), is32,  RW, access_pmintenset},
+	{ CRn( 9), CRm(14), Op1( 0), Op2( 2), is32,  RW, access_pmintenclr},
 
 	/* The Configuration Base Address Register (R/O). */
 	{ CRn(15), CRm( 0), Op1( 4), Op2( 0), is32,  READ, read_zero, 1},
