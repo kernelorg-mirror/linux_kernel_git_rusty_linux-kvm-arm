@@ -43,6 +43,7 @@
 #include <asm/kvm_asm.h>
 #include <asm/kvm_mmu.h>
 #include <asm/kvm_emulate.h>
+#include <asm/kvm_coproc.h>
 
 static DEFINE_PER_CPU(unsigned long, kvm_arm_hyp_stack_page);
 
