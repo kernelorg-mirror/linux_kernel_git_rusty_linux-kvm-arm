@@ -173,14 +173,13 @@ static void print_cp_instr(const struct coproc_params *p)
 {
 	/* Look, we even formatted it for you to paste into the table! */
 	if (p->is_64bit) {
-		kvm_err("{ CRn(DF), CRm(%2lu), Op1(%2lu), Op2(DF), is64, %-6s"
-			" func, arg},\n",
-			p->CRm, p->Op1, p->is_write ? "WRITE," : "READ,");
+		kvm_err(" { CRm(%2lu), Op1(%2lu), is64, func_%s },\n",
+			p->CRm, p->Op1, p->is_write ? "write" : "read");
 	} else {
-		kvm_err("{ CRn(%2lu), CRm(%2lu), Op1(%2lu), Op2(%2lu), is32,"
-			" %-6s func, arg},\n",
+		kvm_err(" { CRn(%2lu), CRm(%2lu), Op1(%2lu), Op2(%2lu), is32,"
+			" func_%s },\n",
 			p->CRn, p->CRm, p->Op1, p->Op2,
-			p->is_write ? "WRITE," : "READ,");
+			p->is_write ? "write" : "read");
 	}
 }
 
@@ -229,11 +228,14 @@ static bool read_zero(struct kvm_vcpu *vcpu,
 	return true;
 }
 
-static bool read_l2ctlr(struct kvm_vcpu *vcpu,
+static bool access_l2ctlr(struct kvm_vcpu *vcpu,
 			const struct coproc_params *p,
 			unsigned long arg)
 {
 	u32 l2ctlr, ncores;
+
+	if (p->is_write)
+		return false;
 
 	switch (vcpu->arch.target) {
 	case KVM_ARM_TARGET_CORTEX_A15:
@@ -248,32 +250,39 @@ static bool read_l2ctlr(struct kvm_vcpu *vcpu,
 	}
 }
 
-static bool write_l2ctlr(struct kvm_vcpu *vcpu,
-			 const struct coproc_params *p,
-			 unsigned long arg)
-{
-	return false;
-}
-
 static bool access_l2ectlr(struct kvm_vcpu *vcpu,
 			   const struct coproc_params *p,
 			   unsigned long arg)
 {
+	if (p->is_write)
+		return false;
+
 	switch (vcpu->arch.target) {
 	case KVM_ARM_TARGET_CORTEX_A15:
-		if (!p->is_write)
-			*vcpu_reg(vcpu, p->Rt1) = 0;
+		*vcpu_reg(vcpu, p->Rt1) = 0;
 		return true;
 	default:
 		return false;
 	}
 }
 
-static bool read_actlr(struct kvm_vcpu *vcpu,
-		       const struct coproc_params *p,
-		       unsigned long arg)
+static bool access_cbar(struct kvm_vcpu *vcpu,
+			const struct coproc_params *p,
+			unsigned long arg)
+{
+	if (p->is_write)
+		return false;
+	return read_zero(vcpu, p, 0);
+}
+
+static bool access_actlr(struct kvm_vcpu *vcpu,
+			 const struct coproc_params *p,
+			 unsigned long arg)
 {
 	u32 actlr;
+
+	if (p->is_write)
+		return ignore_write(vcpu, p, 0);
 
 	switch (vcpu->arch.target) {
 	case KVM_ARM_TARGET_CORTEX_A15:
@@ -294,11 +303,14 @@ static bool read_actlr(struct kvm_vcpu *vcpu,
 	return true;
 }
 
-static bool write_dcsw(struct kvm_vcpu *vcpu,
-		       const struct coproc_params *p,
-		       unsigned long cp15_reg)
+static bool access_dcsw(struct kvm_vcpu *vcpu,
+			const struct coproc_params *p,
+			unsigned long arg)
 {
 	u32 val;
+
+	if (!p->is_write)
+		return false;
 
 	val = *vcpu_reg(vcpu, p->Rt1);
 
@@ -352,109 +364,87 @@ static bool pm_fake(struct kvm_vcpu *vcpu,
 #define access_pmintenset pm_fake
 #define access_pmintenclr pm_fake
 
-/* Any field which is 0xFFFFFFFF == DF */
-struct coproc_emulate {
+struct coproc_reg {
 	unsigned long CRn;
 	unsigned long CRm;
 	unsigned long Op1;
 	unsigned long Op2;
 
-	unsigned long is_64;
-	unsigned long is_w;
+	bool is_64;
 
-	bool (*f)(struct kvm_vcpu *,
-		  const struct coproc_params *,
-		  unsigned long);
+	bool (*access)(struct kvm_vcpu *,
+		       const struct coproc_params *,
+		       unsigned long);
 	unsigned long arg;
 };
 
-#define DF (-1UL) /* Default: If nothing else fits, use this one */
 #define CRn(_x)		.CRn = _x
 #define CRm(_x) 	.CRm = _x
 #define Op1(_x) 	.Op1 = _x
 #define Op2(_x) 	.Op2 = _x
 #define is64		.is_64 = true
 #define is32		.is_64 = false
-#define READ		.is_w  = false
-#define WRITE		.is_w  = true
-#define RW		.is_w  = DF
 
-static const struct coproc_emulate coproc_emulate[] = {
+static const struct coproc_reg cp15_regs[] = {
 	/*
 	 * ACTRL access:
 	 *
 	 * Ignore writes, and read returns the host settings.
 	 */
-	{ CRn( 1), CRm( 0), Op1( 0), Op2( 1), is32, WRITE, ignore_write},
-	{ CRn( 1), CRm( 0), Op1( 0), Op2( 1), is32, READ,  read_actlr},
+	{ CRn( 1), CRm( 0), Op1( 0), Op2( 1), is32, access_actlr},
 	/*
 	 * DC{C,I,CI}SW operations:
 	 */
-	{ CRn( 7), CRm( 6), Op1( 0), Op2( 2), is32,  WRITE, write_dcsw},
-	{ CRn( 7), CRm(10), Op1( 0), Op2( 2), is32,  WRITE, write_dcsw},
-	{ CRn( 7), CRm(14), Op1( 0), Op2( 2), is32,  WRITE, write_dcsw},
+	{ CRn( 7), CRm( 6), Op1( 0), Op2( 2), is32, access_dcsw},
+	{ CRn( 7), CRm(10), Op1( 0), Op2( 2), is32, access_dcsw},
+	{ CRn( 7), CRm(14), Op1( 0), Op2( 2), is32, access_dcsw},
 	/*
 	 * L2CTLR access (guest wants to know #CPUs).
 	 */
-	{ CRn( 9), CRm( 0), Op1( 1), Op2( 2), is32,  READ,  read_l2ctlr},
-	{ CRn( 9), CRm( 0), Op1( 1), Op2( 2), is32,  WRITE, write_l2ctlr},
-	{ CRn( 9), CRm( 0), Op1( 1), Op2( 3), is32,  READ,  access_l2ectlr},
-
+	{ CRn( 9), CRm( 0), Op1( 1), Op2( 2), is32, access_l2ctlr},
+	{ CRn( 9), CRm( 0), Op1( 1), Op2( 3), is32, access_l2ectlr},
 	/*
 	 * Dummy performance monitor implementation.
 	 */
-	{ CRn( 9), CRm(12), Op1( 0), Op2( 0), is32,  RW, access_pmcr},
-	{ CRn( 9), CRm(12), Op1( 0), Op2( 1), is32,  RW, access_pmcntenset},
-	{ CRn( 9), CRm(12), Op1( 0), Op2( 2), is32,  RW, access_pmcntenclr},
-	{ CRn( 9), CRm(12), Op1( 0), Op2( 3), is32,  RW, access_pmovsr},
-	{ CRn( 9), CRm(12), Op1( 0), Op2( 5), is32,  RW, access_pmselr},
-	{ CRn( 9), CRm(12), Op1( 0), Op2( 6), is32,  RW, access_pmceid0},
-	{ CRn( 9), CRm(12), Op1( 0), Op2( 7), is32,  RW, access_pmceid1},
-	{ CRn( 9), CRm(13), Op1( 0), Op2( 0), is32,  RW, access_pmccntr},
-	{ CRn( 9), CRm(13), Op1( 0), Op2( 1), is32,  RW, access_pmxevtyper},
-	{ CRn( 9), CRm(13), Op1( 0), Op2( 2), is32,  RW, access_pmxevcntr},
-	{ CRn( 9), CRm(14), Op1( 0), Op2( 0), is32,  RW, access_pmuserenr},
-	{ CRn( 9), CRm(14), Op1( 0), Op2( 1), is32,  RW, access_pmintenset},
-	{ CRn( 9), CRm(14), Op1( 0), Op2( 2), is32,  RW, access_pmintenclr},
+	{ CRn( 9), CRm(12), Op1( 0), Op2( 0), is32, access_pmcr},
+	{ CRn( 9), CRm(12), Op1( 0), Op2( 1), is32, access_pmcntenset},
+	{ CRn( 9), CRm(12), Op1( 0), Op2( 2), is32, access_pmcntenclr},
+	{ CRn( 9), CRm(12), Op1( 0), Op2( 3), is32, access_pmovsr},
+	{ CRn( 9), CRm(12), Op1( 0), Op2( 5), is32, access_pmselr},
+	{ CRn( 9), CRm(12), Op1( 0), Op2( 6), is32, access_pmceid0},
+	{ CRn( 9), CRm(12), Op1( 0), Op2( 7), is32, access_pmceid1},
+	{ CRn( 9), CRm(13), Op1( 0), Op2( 0), is32, access_pmccntr},
+	{ CRn( 9), CRm(13), Op1( 0), Op2( 1), is32, access_pmxevtyper},
+	{ CRn( 9), CRm(13), Op1( 0), Op2( 2), is32, access_pmxevcntr},
+	{ CRn( 9), CRm(14), Op1( 0), Op2( 0), is32, access_pmuserenr},
+	{ CRn( 9), CRm(14), Op1( 0), Op2( 1), is32, access_pmintenset},
+	{ CRn( 9), CRm(14), Op1( 0), Op2( 2), is32, access_pmintenclr},
 
 	/* The Configuration Base Address Register (R/O). */
-	{ CRn(15), CRm( 0), Op1( 4), Op2( 0), is32,  READ, read_zero, 1},
+	{ CRn(15), CRm( 0), Op1( 4), Op2( 0), is32, access_cbar},
 };
-
-#undef is64
-#undef is32
-#undef READ
-#undef WRITE
-#undef RW
-
-static inline bool match(unsigned long val, unsigned long param)
-{
-	return param == DF || val == param;
-}
 
 static int emulate_cp15(struct kvm_vcpu *vcpu,
 			const struct coproc_params *params)
 {
 	unsigned long instr_len, i;
 
-	for (i = 0; i < ARRAY_SIZE(coproc_emulate); i++) {
-		const struct coproc_emulate *e = &coproc_emulate[i];
+	for (i = 0; i < ARRAY_SIZE(cp15_regs); i++) {
+		const struct coproc_reg *r = &cp15_regs[i];
 
-		if (!match(params->is_64bit, e->is_64))
+		if (params->is_64bit != r->is_64)
 			continue;
-		if (!match(params->is_write, e->is_w))
+		if (params->CRn != r->CRn)
 			continue;
-		if (!match(params->CRn, e->CRn))
+		if (params->CRm != r->CRm)
 			continue;
-		if (!match(params->CRm, e->CRm))
+		if (params->Op1 != r->Op1)
 			continue;
-		if (!match(params->Op1, e->Op1))
-			continue;
-		if (!match(params->Op2, e->Op2))
+		if (params->Op2 != r->Op2)
 			continue;
 
 		/* If function fails, it should complain. */
-		if (!e->f(vcpu, params, e->arg))
+		if (!r->access(vcpu, params, r->arg))
 			goto undef;
 
 		/* Skip instruction, since it was emulated */
