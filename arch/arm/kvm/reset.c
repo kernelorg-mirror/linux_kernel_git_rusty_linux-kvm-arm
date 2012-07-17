@@ -101,8 +101,8 @@ int kvm_reset_vcpu(struct kvm_vcpu *vcpu)
 	u32 (*cp15_reset)[2];
 	void (*cpu_reset_vcpu)(struct kvm_vcpu *vcpu);
 
-	switch (kvm_target_cpu()) {
-	case CORTEX_A15:
+	switch (vcpu->arch.target) {
+	case KVM_ARM_TARGET_CORTEX_A15:
 		if (vcpu->vcpu_id > a15_max_cpu_idx)
 			return -EINVAL;
 		cpu_reset = &a15_regs_reset;

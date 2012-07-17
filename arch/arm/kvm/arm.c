@@ -282,8 +282,8 @@ int __attribute_const__ kvm_target_cpu(void)
 
 	midr = read_cpuid_id();
 	switch ((midr >> 4) & 0xfff) {
-	case CORTEX_A15:
-		return CORTEX_A15;
+	case KVM_ARM_TARGET_CORTEX_A15:
+		return KVM_ARM_TARGET_CORTEX_A15;
 	default:
 		return -EINVAL;
 	}
@@ -291,12 +291,6 @@ int __attribute_const__ kvm_target_cpu(void)
 
 int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 {
-	int ret;
-
-	ret = kvm_reset_vcpu(vcpu);
-	if (ret < 0)
-		return ret;
-
 	/* Set up VGIC */
 	kvm_vgic_vcpu_init(vcpu);
 
@@ -572,6 +566,10 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu, struct kvm_run *run)
 	int exit_reason;
 	sigset_t sigsaved;
 
+	/* Make sure they initialize the vcpu with KVM_ARM_VCPU_INIT */
+	if (unlikely(!vcpu->arch.target))
+		return -ENOEXEC;
+
 	if (run->exit_reason == KVM_EXIT_MMIO) {
 		ret = kvm_handle_mmio_return(vcpu, vcpu->run);
 		if (ret)
@@ -731,6 +729,14 @@ long kvm_arch_vcpu_ioctl(struct file *filp,
 		return kvm_vgic_inject_irq(vcpu->kvm, vcpu->vcpu_id, &irq_event);
 	}
 #endif
+	case KVM_ARM_VCPU_INIT: {
+		struct kvm_vcpu_init init;
+
+		if (copy_from_user(&init, argp, sizeof init))
+			return -EFAULT;
+
+		return kvm_vcpu_set_target(vcpu, &init);
+	}
 	default:
 		return -EINVAL;
 	}

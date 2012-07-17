@@ -148,6 +148,31 @@ int kvm_arch_vcpu_ioctl_set_sregs(struct kvm_vcpu *vcpu,
 	return -EINVAL;
 }
 
+int kvm_vcpu_set_target(struct kvm_vcpu *vcpu,
+			const struct kvm_vcpu_init *init)
+{
+	unsigned int i;
+
+	/* We can only do a cortex A15 for now. */
+	if (init->target != kvm_target_cpu())
+		return -EINVAL;
+
+	vcpu->arch.target = init->target;
+	bitmap_zero(vcpu->arch.features, NUM_FEATURES);
+
+	/* -ENOENT for unknown features, -EINVAL for invalid combinations. */
+	for (i = 0; i < ARRAY_SIZE(init->features)*8; i++) {
+		if (init->features[i / 32] & (1 << (i % 32))) {
+			if (i >= NUM_FEATURES)
+				return -ENOENT;
+			set_bit(i, vcpu->arch.features);
+		}
+	}
+
+	/* Now we know what it is, we can reset it. */
+	return kvm_reset_vcpu(vcpu);
+}
+
 int kvm_arch_vcpu_ioctl_get_fpu(struct kvm_vcpu *vcpu, struct kvm_fpu *fpu)
 {
 	return -EINVAL;

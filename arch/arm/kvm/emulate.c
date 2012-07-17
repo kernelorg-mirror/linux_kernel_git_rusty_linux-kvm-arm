@@ -235,8 +235,8 @@ static bool read_l2ctlr(struct kvm_vcpu *vcpu,
 {
 	u32 l2ctlr, ncores;
 
-	switch (kvm_target_cpu()) {
-	case CORTEX_A15:
+	switch (vcpu->arch.target) {
+	case KVM_ARM_TARGET_CORTEX_A15:
 		asm volatile("mrc p15, 1, %0, c9, c0, 2\n" : "=r" (l2ctlr));
 		l2ctlr &= ~(3 << 24);
 		ncores = atomic_read(&vcpu->kvm->online_vcpus) - 1;
@@ -259,8 +259,8 @@ static bool access_l2ectlr(struct kvm_vcpu *vcpu,
 			   const struct coproc_params *p,
 			   unsigned long arg)
 {
-	switch (kvm_target_cpu()) {
-	case CORTEX_A15:
+	switch (vcpu->arch.target) {
+	case KVM_ARM_TARGET_CORTEX_A15:
 		if (!p->is_write)
 			*vcpu_reg(vcpu, p->Rt1) = 0;
 		return true;
@@ -275,8 +275,8 @@ static bool read_actlr(struct kvm_vcpu *vcpu,
 {
 	u32 actlr;
 
-	switch (kvm_target_cpu()) {
-	case CORTEX_A15:
+	switch (vcpu->arch.target) {
+	case KVM_ARM_TARGET_CORTEX_A15:
 		asm volatile("mrc p15, 0, %0, c1, c0, 1\n" : "=r" (actlr));
 		/* Make the SMP bit consistent with the guest configuration */
 		if (atomic_read(&vcpu->kvm->online_vcpus) > 1)

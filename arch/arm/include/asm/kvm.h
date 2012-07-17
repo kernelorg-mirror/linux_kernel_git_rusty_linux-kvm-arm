@@ -68,6 +68,14 @@ struct kvm_regs {
 
 };
 
+/* Supported Processor Types */
+#define KVM_ARM_TARGET_CORTEX_A15	(0xC0F)
+
+struct kvm_vcpu_init {
+	__u32 target;
+	__u32 features[7];
+};
+
 struct kvm_sregs {
 };
 
