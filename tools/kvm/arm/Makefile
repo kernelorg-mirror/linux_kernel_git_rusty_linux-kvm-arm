@@ -50,4 +50,7 @@ guest-base.o: guest-base.S
 clean distclean:
 	rm -f $(GUESTS) $(HOST_DRIVERS) guest-driver guest-base.o $(OBJS)
 
+install: all
+	cp guest-driver $(GUESTS) $(DESTDIR)
+
 .PHONY: clean distclean headers
