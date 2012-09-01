@@ -23,6 +23,7 @@
 #define KVM_MEMORY_SLOTS 32
 /* memory slots that does not exposed to userspace */
 #define KVM_PRIVATE_MEM_SLOTS 4
+#define KVM_HAVE_ONE_REG
 
 struct sca_entry {
 	atomic_t scn;

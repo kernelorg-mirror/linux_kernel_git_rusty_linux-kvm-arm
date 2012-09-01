@@ -1936,6 +1936,21 @@ out_free2:
 		r = 0;
 		break;
 	}
+#ifdef KVM_HAVE_ONE_REG
+	case KVM_SET_ONE_REG:
+	case KVM_GET_ONE_REG: {
+		struct kvm_one_reg reg;
+		r = -EFAULT;
+		if (copy_from_user(&reg, argp, sizeof(reg)))
+			goto out;
+		if (ioctl == KVM_SET_ONE_REG)
+			r = kvm_arch_set_reg(vcpu, &reg);
+		else
+			r = kvm_arch_get_reg(vcpu, &reg);
+		break;
+	}
+#endif
+
 	default:
 		r = kvm_arch_vcpu_ioctl(filp, ioctl, arg);
 	}
@@ -2246,6 +2261,9 @@ static long kvm_dev_ioctl_check_extension_generic(long arg)
 	case KVM_CAP_INTERNAL_ERROR_DATA:
 #ifdef CONFIG_HAVE_KVM_MSI
 	case KVM_CAP_SIGNAL_MSI:
+#endif
+#ifdef KVM_HAVE_ONE_REG
+	case KVM_CAP_ONE_REG:
 #endif
 		return 1;
 #ifdef KVM_CAP_IRQ_ROUTING

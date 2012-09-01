@@ -566,6 +566,10 @@ void kvm_arch_hardware_unsetup(void);
 void kvm_arch_check_processor_compat(void *rtn);
 int kvm_arch_vcpu_runnable(struct kvm_vcpu *vcpu);
 int kvm_arch_vcpu_should_kick(struct kvm_vcpu *vcpu);
+#ifdef KVM_HAVE_ONE_REG
+int kvm_arch_get_reg(struct kvm_vcpu *vcpu, const struct kvm_one_reg *reg);
+int kvm_arch_set_reg(struct kvm_vcpu *vcpu, const struct kvm_one_reg *reg);
+#endif
 
 void kvm_free_physmem(struct kvm *kvm);
 

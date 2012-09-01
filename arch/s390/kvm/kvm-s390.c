@@ -139,7 +139,6 @@ int kvm_dev_ioctl_check_extension(long ext)
 	case KVM_CAP_S390_UCONTROL:
 #endif
 	case KVM_CAP_SYNC_REGS:
-	case KVM_CAP_ONE_REG:
 		r = 1;
 		break;
 	case KVM_CAP_NR_VCPUS:
@@ -447,8 +446,7 @@ int kvm_arch_vcpu_should_kick(struct kvm_vcpu *vcpu)
 	return 0;
 }
 
-static int kvm_arch_vcpu_ioctl_get_one_reg(struct kvm_vcpu *vcpu,
-					   struct kvm_one_reg *reg)
+int kvm_arch_get_reg(struct kvm_vcpu *vcpu, const struct kvm_one_reg *reg)
 {
 	int r = -EINVAL;
 
@@ -476,8 +474,7 @@ static int kvm_arch_vcpu_ioctl_get_one_reg(struct kvm_vcpu *vcpu,
 	return r;
 }
 
-static int kvm_arch_vcpu_ioctl_set_one_reg(struct kvm_vcpu *vcpu,
-					   struct kvm_one_reg *reg)
+int kvm_arch_set_reg(struct kvm_vcpu *vcpu, const struct kvm_one_reg *reg)
 {
 	int r = -EINVAL;
 
@@ -839,18 +836,6 @@ long kvm_arch_vcpu_ioctl(struct file *filp,
 	case KVM_S390_INITIAL_RESET:
 		r = kvm_arch_vcpu_ioctl_initial_reset(vcpu);
 		break;
-	case KVM_SET_ONE_REG:
-	case KVM_GET_ONE_REG: {
-		struct kvm_one_reg reg;
-		r = -EFAULT;
-		if (copy_from_user(&reg, argp, sizeof(reg)))
-			break;
-		if (ioctl == KVM_SET_ONE_REG)
-			r = kvm_arch_vcpu_ioctl_set_one_reg(vcpu, &reg);
-		else
-			r = kvm_arch_vcpu_ioctl_get_one_reg(vcpu, &reg);
-		break;
-	}
 #ifdef CONFIG_KVM_S390_UCONTROL
 	case KVM_S390_UCAS_MAP: {
 		struct kvm_s390_ucas_mapping ucasmap;

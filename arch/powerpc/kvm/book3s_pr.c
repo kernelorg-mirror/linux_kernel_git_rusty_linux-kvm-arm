@@ -899,7 +899,7 @@ int kvm_arch_vcpu_ioctl_set_sregs(struct kvm_vcpu *vcpu,
 	return 0;
 }
 
-int kvm_vcpu_ioctl_get_one_reg(struct kvm_vcpu *vcpu, struct kvm_one_reg *reg)
+int kvm_arch_get_reg(struct kvm_vcpu *vcpu, const struct kvm_one_reg *reg)
 {
 	int r = -EINVAL;
 
@@ -915,7 +915,7 @@ int kvm_vcpu_ioctl_get_one_reg(struct kvm_vcpu *vcpu, struct kvm_one_reg *reg)
 	return r;
 }
 
-int kvm_vcpu_ioctl_set_one_reg(struct kvm_vcpu *vcpu, struct kvm_one_reg *reg)
+int kvm_arch_set_reg(struct kvm_vcpu *vcpu, const struct kvm_one_reg *reg)
 {
 	int r = -EINVAL;
 

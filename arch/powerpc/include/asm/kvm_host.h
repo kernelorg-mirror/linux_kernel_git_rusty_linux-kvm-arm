@@ -49,6 +49,7 @@
 #include <linux/mmu_notifier.h>
 
 #define KVM_ARCH_WANT_MMU_NOTIFIER
+#define KVM_HAVE_ONE_REG
 
 struct kvm;
 extern int kvm_unmap_hva(struct kvm *kvm, unsigned long hva);
