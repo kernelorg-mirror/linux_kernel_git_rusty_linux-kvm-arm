@@ -768,21 +768,6 @@ long kvm_arch_vcpu_ioctl(struct file *filp,
 		return kvm_vcpu_set_target(vcpu, &init);
 
 	}
-	case KVM_VCPU_GET_MSR_INDEX_LIST: {
-		struct kvm_msr_list __user *user_msr_list = argp;
-		struct kvm_msr_list msr_list;
-		unsigned n;
-
-		if (copy_from_user(&msr_list, user_msr_list, sizeof msr_list))
-			return -EFAULT;
-		n = msr_list.nmsrs;
-		msr_list.nmsrs = kvm_arm_num_guest_msrs(vcpu);
-		if (copy_to_user(user_msr_list, &msr_list, sizeof msr_list))
-			return -EFAULT;
-		if (n < msr_list.nmsrs)
-			return -E2BIG;
-		return kvm_arm_copy_msrindices(vcpu, user_msr_list->indices);
-	}
 #ifdef CONFIG_KVM_ARM_VGIC
 	case KVM_IRQ_LINE: {
 		struct kvm_irq_level irq_event;

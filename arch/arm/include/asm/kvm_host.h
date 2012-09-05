@@ -26,6 +26,7 @@
 #define KVM_PRIVATE_MEM_SLOTS 4
 #define KVM_COALESCED_MMIO_PAGE_OFFSET 1
 #define KVM_HAVE_ONE_REG
+#define KVM_HAVE_REG_LIST
 
 #include <asm/kvm_vgic.h>
 
