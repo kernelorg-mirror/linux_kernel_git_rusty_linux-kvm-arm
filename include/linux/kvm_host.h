@@ -570,7 +570,10 @@ int kvm_arch_vcpu_should_kick(struct kvm_vcpu *vcpu);
 int kvm_arch_get_reg(struct kvm_vcpu *vcpu, const struct kvm_one_reg *reg);
 int kvm_arch_set_reg(struct kvm_vcpu *vcpu, const struct kvm_one_reg *reg);
 #endif
-
+#ifdef KVM_HAVE_REG_LIST
+unsigned long kvm_arch_num_regs(struct kvm_vcpu *vcpu);
+int kvm_arch_copy_reg_indices(struct kvm_vcpu *vcpu, u64 __user *indices);
+#endif
 void kvm_free_physmem(struct kvm *kvm);
 
 void *kvm_kvzalloc(unsigned long size);

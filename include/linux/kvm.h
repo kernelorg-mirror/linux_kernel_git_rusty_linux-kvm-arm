@@ -657,6 +657,7 @@ struct kvm_irq_routing {
 };
 
 #endif
+#define KVM_CAP_REG_LIST 82
 
 #ifdef KVM_CAP_MCE
 /* x86 MCE */
@@ -909,6 +910,7 @@ struct kvm_s390_ucas_mapping {
 #define KVM_KVMCLOCK_CTRL	  _IO(KVMIO,   0xad)
 #define KVM_ARM_VCPU_INIT	  _IOW(KVMIO,  0xae, struct kvm_vcpu_init)
 #define KVM_VCPU_GET_MSR_INDEX_LIST    _IOWR(KVMIO, 0xaf, struct kvm_msr_list)
+#define KVM_VCPU_GET_REG_LIST	  _IOWR(KVMIO, 0xb0, struct kvm_reg_list)
 
 #define KVM_DEV_ASSIGN_ENABLE_IOMMU	(1 << 0)
 #define KVM_DEV_ASSIGN_PCI_2_3		(1 << 1)
@@ -960,4 +962,9 @@ struct kvm_assigned_msix_entry {
 	__u16 padding[3];
 };
 
+/* For KVM_VCPU_GET_REG_LIST. */
+struct kvm_reg_list {
+	__u64 n; /* number of regs */
+	__u64 reg[0];
+};
 #endif /* __LINUX_KVM_H */

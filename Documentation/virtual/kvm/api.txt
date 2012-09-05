@@ -1998,6 +1998,26 @@ the virtualized real-mode area (VRMA) facility, the kernel will
 re-create the VMRA HPTEs on the next KVM_RUN of any vcpu.)
 
 
+4.76 KVM_VCPU_GET_REG_LIST
+
+Capability: KVM_CAP_REG_LIST
+Architectures: all
+Type: vcpu ioctl
+Parameters: struct kvm_reg_list (in/out)
+Returns: 0 on success; -1 on error
+Errors:
+  E2BIG:     the reg index list is too big to fit in the array specified by
+             the user (the number required will be written into n).
+
+struct kvm_reg_list {
+	__u64 n; /* number of registers in reg[] */
+	__u64 reg[0];
+};
+
+This ioctl returns the guest registers that are supported for the
+KVM_GET_ONE_REG/KVM_SET_ONE_REG calls.
+
+
 4.76 KVM_VCPU_GET_MSR_INDEX_LIST
 
 Capability: basic

@@ -1950,6 +1950,23 @@ out_free2:
 		break;
 	}
 #endif
+#ifdef KVM_HAVE_REG_LIST
+	case KVM_VCPU_GET_REG_LIST: {
+		struct kvm_reg_list __user *user_list = argp;
+		struct kvm_reg_list reg_list;
+		unsigned n;
+
+		if (copy_from_user(&reg_list, user_list, sizeof reg_list))
+			return -EFAULT;
+		n = reg_list.n;
+		reg_list.n = kvm_arch_num_regs(vcpu);
+		if (copy_to_user(user_list, &reg_list, sizeof reg_list))
+			return -EFAULT;
+		if (n < reg_list.n)
+			return -E2BIG;
+		return kvm_arch_copy_reg_indices(vcpu, user_list->reg);
+	}
+#endif
 
 	default:
 		r = kvm_arch_vcpu_ioctl(filp, ioctl, arg);
@@ -2264,6 +2281,9 @@ static long kvm_dev_ioctl_check_extension_generic(long arg)
 #endif
 #ifdef KVM_HAVE_ONE_REG
 	case KVM_CAP_ONE_REG:
+#endif
+#ifdef KVM_HAVE_REG_LIST
+	case KVM_CAP_REG_LIST:
 #endif
 		return 1;
 #ifdef KVM_CAP_IRQ_ROUTING
