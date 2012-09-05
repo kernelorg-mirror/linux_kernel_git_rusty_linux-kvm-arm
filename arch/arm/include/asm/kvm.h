@@ -32,31 +32,15 @@ enum KVM_ARM_IRQ_LINE_TYPE {
 	KVM_ARM_FIQ_LINE = 1,
 };
 
-/*
- * Modes used for short-hand mode determinition in the world-switch code and
- * in emulation code.
- *
- * Note: These indices do NOT correspond to the value of the CPSR mode bits!
- */
-enum vcpu_mode {
-	MODE_FIQ = 0,
-	MODE_IRQ,
-	MODE_SVC,
-	MODE_ABT,
-	MODE_UND,
-	MODE_USR,
-	MODE_SYS
-};
-
 struct kvm_regs {
-	__u32 regs0_7[8];	/* Unbanked regs. (r0 - r7)	   */
-	__u32 fiq_regs8_12[5];	/* Banked fiq regs. (r8 - r12)	   */
-	__u32 usr_regs8_12[5];	/* Banked usr registers (r8 - r12) */
-	__u32 reg13[6];		/* Banked r13, indexed by MODE_	   */
-	__u32 reg14[6];		/* Banked r13, indexed by MODE_	   */
-	__u32 reg15;
-	__u32 cpsr;
-	__u32 spsr[5];		/* Banked SPSR,  indexed by MODE_  */
+	__u32 usr_regs[15];	/* R0_usr - R14_usr */
+	__u32 svc_regs[3];	/* SP_svc, LR_svc, SPSR_svc */
+	__u32 abt_regs[3];	/* SP_abt, LR_abt, SPSR_abt */
+	__u32 und_regs[3];	/* SP_und, LR_und, SPSR_und */
+	__u32 irq_regs[3];	/* SP_irq, LR_irq, SPSR_irq */
+	__u32 fiq_regs[8];	/* R8_fiq - R14_fiq, SPSR_fiq */
+	__u32 pc;		/* The program counter (r15) */
+	__u32 cpsr;		/* The guest CPSR */
 };
 
 /* Supported Processor Types */
@@ -96,5 +80,9 @@ struct kvm_arch_memory_slot {
 #define KVM_REG_ARM_CRM_SHIFT		7
 #define KVM_REG_ARM_32_CRN_MASK		0x0000000000007800
 #define KVM_REG_ARM_32_CRN_SHIFT	11
+
+/* Normal registers are mapped as coprocessor 16. */
+#define KVM_REG_ARM_CORE		(0x0010 << KVM_REG_ARM_COPROC_SHIFT)
+#define KVM_REG_ARM_CORE_REG(name)	(offsetof(struct kvm_regs, name) / 4)
 
 #endif /* __ARM_KVM_H__ */
