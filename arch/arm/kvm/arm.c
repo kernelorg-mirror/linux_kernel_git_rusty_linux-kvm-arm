@@ -783,20 +783,6 @@ long kvm_arch_vcpu_ioctl(struct file *filp,
 			return -E2BIG;
 		return kvm_arm_copy_msrindices(vcpu, user_msr_list->indices);
 	}
-	case KVM_GET_MSRS: {
-		struct kvm_msrs msrs;
-		struct kvm_msrs __user *umsrs = argp;
-		if (copy_from_user(&msrs, umsrs, sizeof(msrs)) != 0)
-			return -EFAULT;
-		return kvm_arm_get_msrs(vcpu, umsrs->entries, msrs.nmsrs);
-	}
-	case KVM_SET_MSRS: {
-		struct kvm_msrs msrs;
-		struct kvm_msrs __user *umsrs = argp;
-		if (copy_from_user(&msrs, umsrs, sizeof(msrs)) != 0)
-			return -EFAULT;
-		return kvm_arm_set_msrs(vcpu, umsrs->entries, msrs.nmsrs);
-	}
 #ifdef CONFIG_KVM_ARM_VGIC
 	case KVM_IRQ_LINE: {
 		struct kvm_irq_level irq_event;
