@@ -24,6 +24,9 @@
 #define __KVM_HAVE_GUEST_DEBUG
 #define __KVM_HAVE_IRQ_LINE
 
+#define KVM_REG_SIZE(id)						\
+	(1U << (((id) & KVM_REG_SIZE_MASK) >> KVM_REG_SIZE_SHIFT))
+
 /*
  * KVM_IRQ_LINE macros to set/read IRQ/FIQ for specific VCPU index.
  */
