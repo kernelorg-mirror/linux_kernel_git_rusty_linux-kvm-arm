@@ -33,7 +33,7 @@
 
 static const int a15_max_cpu_idx = 3;
 
-static struct kvm_vcpu_regs a15_regs_reset = {
+static struct kvm_regs a15_regs_reset = {
 	.cpsr = SVC_MODE | PSR_A_BIT | PSR_I_BIT | PSR_F_BIT,
 };
 
@@ -51,7 +51,7 @@ static struct kvm_vcpu_regs a15_regs_reset = {
  */
 int kvm_reset_vcpu(struct kvm_vcpu *vcpu)
 {
-	struct kvm_vcpu_regs *cpu_reset;
+	struct kvm_regs *cpu_reset;
 
 	switch (vcpu->arch.target) {
 	case KVM_ARM_TARGET_CORTEX_A15:
